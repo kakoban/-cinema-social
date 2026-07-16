@@ -1,0 +1,185 @@
+// Cinema Social — Prisma schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  password     String
+  avatar       String?
+  bio          String?
+  role         String   @default("USER") // USER | ADMIN
+  language     String   @default("en") // en | fa
+  theme        String   @default("dark") // dark | light | system
+  banned       Boolean  @default(false)
+  tokenVersion Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reviews        Review[]
+  watchlists     Watchlist[]
+  followers      Follow[]    @relation("Following")
+  following      Follow[]    @relation("Follower")
+  messages       Message[]
+  roomMembers    RoomMember[]
+  notifications  Notification[] @relation("NotifOwner")
+  notifActor     Notification[] @relation("NotifActor")
+  hostedRooms    Room[]       @relation("RoomHost")
+  refreshTokens  RefreshToken[]
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revoked   Boolean  @default(false)
+
+  @@index([userId])
+}
+
+model Movie {
+  id          String   @id @default(cuid())
+  tmdbId      Int?     @unique
+  title       String
+  titleFa     String?
+  poster      String?
+  backdrop    String?
+  description String?
+  year        Int?
+  rating      Float?
+  genre       String?
+  runtime     Int?
+  source      String   @default("TMDB") // TMDB | ARCHIVE | USER
+  videoUrl    String?
+  trailerUrl  String?
+  archiveId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  reviews     Review[]
+  watchlistItems WatchlistItem[]
+  rooms       Room[]
+}
+
+model Room {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  movieId     String?
+  movie       Movie?   @relation(fields: [movieId], references: [id], onDelete: SetNull)
+  hostId      String
+  host        User     @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  isPublic    Boolean  @default(true)
+  maxUsers    Int      @default(50)
+  status      String   @default("WAITING") // WAITING | PLAYING | PAUSED | ENDED
+  currentTime Float    @default(0)
+  isPlaying   Boolean  @default(false)
+  lastSyncAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     RoomMember[]
+  messages    Message[]
+}
+
+model RoomMember {
+  id        String   @id @default(cuid())
+  userId    String
+  roomId    String
+  role      String   @default("VIEWER") // HOST | VIEWER
+  joinedAt  DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roomId])
+  @@index([roomId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  content   String
+  userId    String?
+  roomId    String
+  type      String   @default("TEXT") // TEXT | SYSTEM
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  content   String
+  rating    Float
+  userId    String
+  movieId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, movieId])
+  @@index([movieId])
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followingId])
+}
+
+model Watchlist {
+  id        String   @id @default(cuid())
+  name      String
+  userId    String
+  isPublic  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     WatchlistItem[]
+
+  @@index([userId])
+}
+
+model WatchlistItem {
+  id           String   @id @default(cuid())
+  watchlistId  String
+  movieId      String
+  addedAt      DateTime @default(now())
+  watchlist    Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  movie        Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, movieId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  actorId   String?
+  type      String   // FOLLOW | REVIEW | ROOM_INVITE | SYSTEM
+  content   String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation("NotifOwner", fields: [userId], references: [id], onDelete: Cascade)
+  actor     User?    @relation("NotifActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}

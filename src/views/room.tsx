@@ -1,0 +1,628 @@
+"use client";
+
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { io, Socket } from "socket.io-client";
+import {
+  Send,
+  Users,
+  Play,
+  Pause,
+  SkipForward,
+  SkipBack,
+  Crown,
+  LogOut,
+  Video,
+  AlertCircle,
+  Loader2,
+  Film,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
+import { api } from "@/lib/api-client";
+import { useNavigate } from "@/stores/router";
+import { useAuthStore } from "@/stores/auth-store";
+import { useI18n } from "@/i18n";
+import { UserAvatar } from "@/components/cinema/user-avatar";
+
+interface RoomMember {
+  userId: string;
+  username: string;
+  isHost: boolean;
+}
+interface ChatMessage {
+  id: string;
+  userId: string | null;
+  username: string;
+  content: string;
+  type: "TEXT" | "SYSTEM";
+  createdAt: string;
+}
+interface RoomDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  isPublic: boolean;
+  maxUsers: number;
+  status: string;
+  currentTime: number;
+  isPlaying: boolean;
+  host: { id: string; username: string; avatar: string | null };
+  movie: {
+    id: string;
+    title: string;
+    poster: string | null;
+    videoUrl: string | null;
+    trailerUrl: string | null;
+    source: string;
+    archiveId: string | null;
+    description: string | null;
+    year: number | null;
+  } | null;
+  members: { id: string; role: string; user: { id: string; username: string; avatar: string | null } }[];
+  memberCount: number;
+}
+
+function videoKind(url: string | null): "direct" | "youtube" | "archive" | "vimeo" | "none" {
+  if (!url) return "none";
+  const u = url.toLowerCase();
+  if (u.includes("archive.org/download/") || /\.(mp4|ogv|webm|m4v|mpeg|mpg)(\?|$)/.test(u)) return "direct";
+  if (u.includes("youtube.com/watch") || u.includes("youtube.com/embed") || u.includes("youtu.be")) return "youtube";
+  if (u.includes("archive.org/embed")) return "archive";
+  if (u.includes("vimeo.com")) return "vimeo";
+  return "direct";
+}
+
+function youtubeId(url: string): string | null {
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+export function RoomView({ id }: { id: string }) {
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const qc = useQueryClient();
+
+  const room = useQuery<RoomDetail>({
+    queryKey: ["room", id],
+    queryFn: () => api.get<RoomDetail>(`/api/rooms/${id}`).then((r) => r.data!),
+  });
+
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [members, setMembers] = useState<RoomMember[]>([]);
+  const [input, setInput] = useState("");
+  const [typingUsers, setTypingUsers] = useState<Record<string, { username: string; ts: number }>>({});
+  const [playback, setPlayback] = useState({ currentTime: 0, isPlaying: false });
+  const [hostOffline, setHostOffline] = useState(false);
+  const [joined, setJoined] = useState(false);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const isHostRef = useRef(false);
+  const lastSyncEmit = useRef(0);
+  const driftFixing = useRef(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isHost = !!user && room.data?.host.id === user.id;
+  useEffect(() => {
+    isHostRef.current = isHost;
+  }, [isHost]);
+
+  // Drift-correction for viewers (native video only)
+  const applyViewerSync = useCallback(
+    (targetTime: number, targetPlaying: boolean, serverTs: number) => {
+      const v = videoRef.current;
+      if (!v || isHostRef.current) return;
+      const kind = videoKind(room.data?.movie?.videoUrl || null);
+      if (kind !== "direct") return;
+
+      // compensate for transit time
+      const elapsed = targetPlaying ? (Date.now() - serverTs) / 1000 : 0;
+      const effective = targetTime + elapsed;
+      const diff = v.currentTime - effective;
+
+      if (Math.abs(diff) > 5) {
+        // hard seek
+        v.currentTime = effective;
+        driftFixing.current = false;
+      } else if (Math.abs(diff) > 1.5) {
+        // nudge playback rate
+        driftFixing.current = true;
+        v.playbackRate = diff > 0 ? 0.97 : 1.03;
+      } else {
+        driftFixing.current = false;
+        v.playbackRate = 1;
+      }
+
+      if (targetPlaying && v.paused) {
+        v.play().catch(() => null);
+      } else if (!targetPlaying && !v.paused) {
+        v.pause();
+      }
+    },
+    [room.data?.movie?.videoUrl]
+  );
+
+  // Join via API + socket once we have room + user (or guest)
+  useEffect(() => {
+    if (!room.data) return;
+    let sock: Socket | null = null;
+    let cancelled = false;
+
+    (async () => {
+      // Join DB membership if logged in
+      if (user) {
+        try {
+          await api.post(`/api/rooms/${id}/join`);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (cancelled) return;
+      setJoined(true);
+
+      sock = io("/?XTransformPort=3003", {
+        transports: ["websocket", "polling"],
+        reconnection: true,
+      });
+      setSocket(sock);
+
+      const me = user
+        ? { userId: user.id, username: user.username, isHost: isHostRef.current }
+        : { userId: `guest-${Math.random().toString(36).slice(2, 8)}`, username: `Guest`, isHost: false };
+
+      sock.emit("join:room", {
+        roomId: id,
+        userId: me.userId,
+        username: me.username,
+        isHost: me.isHost,
+      });
+
+      sock.on("chat:message", (msg: ChatMessage) => {
+        setMessages((prev) => [...prev, msg]);
+      });
+      sock.on("chat:typing", (data: { userId: string; username: string }) => {
+        setTypingUsers((prev) => ({
+          ...prev,
+          [data.userId]: { username: data.username, ts: Date.now() },
+        }));
+      });
+      sock.on("room:members", (data: { members: RoomMember[] }) => {
+        setMembers(data.members || []);
+      });
+      sock.on("room:system", (data: { message: string }) => {
+        // optional system event from server
+      });
+      sock.on("playback:sync", (data: { currentTime: number; isPlaying: boolean; serverTimestamp: number }) => {
+        setHostOffline(false);
+        setPlayback({ currentTime: data.currentTime, isPlaying: data.isPlaying });
+        applyViewerSync(data.currentTime, data.isPlaying, data.serverTimestamp);
+      });
+      sock.on("playback:request-sync", () => {
+        // host: send current state to a late joiner
+        if (isHostRef.current && videoRef.current) {
+          sock!.emit("playback:sync", {
+            roomId: id,
+            currentTime: videoRef.current.currentTime,
+            isPlaying: !videoRef.current.paused,
+          });
+        }
+      });
+      sock.on("room:full", () => {
+        toast.error(t("rooms.roomFull"));
+        navigate("/rooms");
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      if (sock) {
+        sock.disconnect();
+      }
+    };
+  }, [room.data?.id, user?.id]);
+
+  // Cleanup: leave room on unmount
+  useEffect(() => {
+    return () => {
+      if (socket) {
+        socket.disconnect();
+      }
+      // best-effort API leave
+      if (user) {
+        api.post(`/api/rooms/${id}/leave`).catch(() => null);
+      }
+    };
+  }, []);
+
+  // clear stale typing indicators
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTypingUsers((prev) => {
+        const now = Date.now();
+        const next: typeof prev = {};
+        for (const [k, v] of Object.entries(prev)) {
+          if (now - v.ts < 3000) next[k] = v;
+        }
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // auto-scroll chat
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // Host: emit sync every 5s
+  useEffect(() => {
+    if (!isHost || !socket) return;
+    const kind = videoKind(room.data?.movie?.videoUrl || null);
+    if (kind !== "direct") return;
+    const interval = setInterval(() => {
+      const v = videoRef.current;
+      if (v && socket) {
+        socket.emit("playback:sync", {
+          roomId: id,
+          currentTime: v.currentTime,
+          isPlaying: !v.paused,
+        });
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isHost, socket, id, room.data?.movie?.videoUrl]);
+
+  const emitSync = useCallback(() => {
+    if (!socket || !isHostRef.current) return;
+    const v = videoRef.current;
+    if (!v) return;
+    socket.emit("playback:sync", {
+      roomId: id,
+      currentTime: v.currentTime,
+      isPlaying: !v.paused,
+    });
+    lastSyncEmit.current = Date.now();
+  }, [socket, id]);
+
+  const handlePlayPause = () => {
+    const v = videoRef.current;
+    if (!v || !isHost) return;
+    if (v.paused) v.play().catch(() => null);
+    else v.pause();
+    setTimeout(emitSync, 100);
+  };
+
+  const handleSeek = (delta: number) => {
+    const v = videoRef.current;
+    if (!v || !isHost) return;
+    v.currentTime = Math.max(0, v.currentTime + delta);
+    setTimeout(emitSync, 100);
+  };
+
+  const onVideoTimeUpdate = () => {
+    if (isHost) {
+      const v = videoRef.current;
+      if (v) setPlayback((p) => ({ ...p, currentTime: v.currentTime, isPlaying: !v.paused }));
+    }
+  };
+
+  const sendMessage = () => {
+    if (!input.trim() || !socket || !user) return;
+    socket.emit("chat:message", {
+      roomId: id,
+      userId: user.id,
+      username: user.username,
+      content: input.trim(),
+    });
+    setInput("");
+  };
+
+  const onTyping = () => {
+    if (!socket || !user) return;
+    if (typingTimer.current) return;
+    socket.emit("chat:typing", { roomId: id, userId: user.id, username: user.username });
+    typingTimer.current = setTimeout(() => {
+      typingTimer.current = null;
+    }, 2000);
+  };
+
+  const leaveRoom = useMutation({
+    mutationFn: () => api.post(`/api/rooms/${id}/leave`),
+    onSuccess: () => {
+      navigate("/rooms");
+    },
+  });
+
+  const deleteRoom = useMutation({
+    mutationFn: () => api.del(`/api/rooms/${id}`),
+    onSuccess: () => {
+      toast.success(t("rooms.delete"));
+      navigate("/rooms");
+    },
+  });
+
+  if (room.isLoading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <Skeleton className="h-8 w-64 mb-4" />
+        <div className="grid lg:grid-cols-3 gap-6">
+          <Skeleton className="lg:col-span-2 aspect-video rounded-xl" />
+          <Skeleton className="h-96 rounded-xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!room.data) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
+        <AlertCircle className="size-12 mx-auto text-muted-foreground mb-3" />
+        <p className="text-muted-foreground mb-4">{t("rooms.noRooms")}</p>
+        <Button onClick={() => navigate("/rooms")} variant="outline">{t("back")}</Button>
+      </div>
+    );
+  }
+
+  const r = room.data;
+  const videoUrl = r.movie?.videoUrl;
+  const kind = videoKind(videoUrl || null);
+  const ytId = kind === "youtube" && videoUrl ? youtubeId(videoUrl) : null;
+
+  const typingList = Object.values(typingUsers).filter((tp) => tp.username !== user?.username);
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 py-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 mb-5 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-2xl font-bold truncate">{r.name}</h1>
+            {r.movie && <Badge variant="secondary" className="shrink-0"><Film className="size-3 me-1" /> {r.movie.title}</Badge>}
+          </div>
+          {r.description && <p className="text-sm text-muted-foreground">{r.description}</p>}
+          <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <Crown className="size-3.5 text-yellow-500" />
+              {r.host.username}
+            </span>
+            <span className="flex items-center gap-1">
+              <Users className="size-3.5" />
+              {members.length || r.memberCount} / {r.maxUsers}
+            </span>
+            {playback.isPlaying ? (
+              <Badge className="bg-red-600 hover:bg-red-700"><Play className="size-3 me-1" />{t("rooms.live")}</Badge>
+            ) : (
+              <Badge variant="secondary"><Pause className="size-3 me-1" />{t("rooms.waiting")}</Badge>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => leaveRoom.mutate()} disabled={leaveRoom.isPending}>
+            <LogOut className="size-4 me-1" /> {t("rooms.leave")}
+          </Button>
+          {isHost && (
+            <Button variant="outline" size="sm" className="text-destructive" onClick={() => deleteRoom.mutate()} disabled={deleteRoom.isPending}>
+              {t("rooms.delete")}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Player */}
+        <div className="lg:col-span-2 space-y-4">
+          <Card className="p-0 overflow-hidden bg-black">
+            {kind === "none" ? (
+              <div className="aspect-video flex flex-col items-center justify-center text-center p-8">
+                <Video className="size-12 text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">{t("rooms.noMovie")}</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-sm">{t("rooms.pickMovie")}</p>
+              </div>
+            ) : kind === "direct" ? (
+              <div className="relative">
+                <video
+                  ref={videoRef}
+                  src={videoUrl!}
+                  className="aspect-video w-full bg-black"
+                  controls={isHost}
+                  playsInline
+                  onPlay={emitSync}
+                  onPause={emitSync}
+                  onSeeked={emitSync}
+                  onTimeUpdate={onVideoTimeUpdate}
+                />
+                {!isHost && (
+                  <div className="absolute top-2 start-2 bg-black/70 backdrop-blur px-2.5 py-1 rounded-full text-xs text-white flex items-center gap-1.5">
+                    <Users className="size-3" />
+                    {t("rooms.syncedPlayback")}
+                  </div>
+                )}
+                {hostOffline && (
+                  <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                    <p className="text-white text-sm flex items-center gap-2">
+                      <AlertCircle className="size-4" /> {t("rooms.hostDisconnected")}
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : kind === "youtube" && ytId ? (
+              <div className="relative">
+                <iframe
+                  src={`https://www.youtube-nocookie.com/embed/${ytId}?controls=${isHost ? 1 : 0}&modestbranding=1`}
+                  className="aspect-video w-full"
+                  allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+                {!isHost && (
+                  <div className="absolute top-2 start-2 bg-black/70 backdrop-blur px-2.5 py-1 rounded-full text-xs text-white">
+                    {t("rooms.syncedPlayback")} (YouTube)
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="relative">
+                <iframe
+                  src={videoUrl!}
+                  className="aspect-video w-full"
+                  allowFullScreen
+                  allow="autoplay; fullscreen"
+                />
+                {!isHost && (
+                  <div className="absolute top-2 start-2 bg-black/70 backdrop-blur px-2.5 py-1 rounded-full text-xs text-white">
+                    {t("rooms.syncedPlayback")}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+
+          {/* Host controls (native video only) */}
+          {isHost && kind === "direct" && (
+            <Card className="p-3 flex items-center justify-center gap-3">
+              <Button variant="outline" size="icon" onClick={() => handleSeek(-10)} title="-10s">
+                <SkipBack className="size-4" />
+              </Button>
+              <Button onClick={handlePlayPause} size="lg" className="bg-red-600 hover:bg-red-700 rounded-full size-12 p-0">
+                {playback.isPlaying ? <Pause className="size-5" /> : <Play className="size-5" />}
+              </Button>
+              <Button variant="outline" size="icon" onClick={() => handleSeek(10)} title="+10s">
+                <SkipForward className="size-4" />
+              </Button>
+              <span className="text-sm text-muted-foreground ms-2">
+                {Math.floor(playback.currentTime / 60)}:{String(Math.floor(playback.currentTime % 60)).padStart(2, "0")}
+              </span>
+              <span className="text-xs text-muted-foreground ms-auto">{t("rooms.hostControls")}</span>
+            </Card>
+          )}
+
+          {kind !== "direct" && kind !== "none" && !isHost && (
+            <Card className="p-3 text-xs text-muted-foreground text-center">
+              {t("rooms.syncedPlayback")} · {t("rooms.hostControls")}
+            </Card>
+          )}
+
+          {/* Movie info */}
+          {r.movie && (
+            <Card className="p-4">
+              <h3 className="font-semibold mb-1">{r.movie.title}</h3>
+              {r.movie.description && (
+                <p className="text-sm text-muted-foreground line-clamp-3">{r.movie.description}</p>
+              )}
+            </Card>
+          )}
+        </div>
+
+        {/* Chat + members */}
+        <div className="space-y-4">
+          <Card className="flex flex-col h-[60vh] min-h-[420px]">
+            <div className="p-3 border-b border-border flex items-center justify-between">
+              <span className="font-semibold text-sm flex items-center gap-2">
+                {t("rooms.chat")}
+              </span>
+              <Badge variant="secondary" className="text-xs">
+                <Users className="size-3 me-1" />
+                {members.length}
+              </Badge>
+            </div>
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto scroll-cinema p-3 space-y-2.5">
+              {messages.length === 0 ? (
+                <p className="text-center text-sm text-muted-foreground py-8">
+                  {t("rooms.chat")} · {t("rooms.messagePlaceholder")}
+                </p>
+              ) : (
+                messages.map((msg) =>
+                  msg.type === "SYSTEM" ? (
+                    <div key={msg.id} className="text-center">
+                      <span className="text-xs text-muted-foreground italic px-2 py-0.5 rounded-full bg-muted/50">
+                        {msg.content}
+                      </span>
+                    </div>
+                  ) : (
+                    <div key={msg.id} className="flex gap-2">
+                      <UserAvatar username={msg.username} size={28} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xs font-medium">{msg.username}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        <p className="text-sm break-words">{msg.content}</p>
+                      </div>
+                    </div>
+                  )
+                )
+              )}
+              {typingList.length > 0 && (
+                <p className="text-xs text-muted-foreground italic px-1">
+                  {typingList.length === 1
+                    ? t("rooms.typing", { name: typingList[0].username })
+                    : t("rooms.peopleTyping", { count: typingList.length })}
+                </p>
+              )}
+            </div>
+            <Separator />
+            <div className="p-3">
+              {user ? (
+                <div className="flex gap-2">
+                  <Input
+                    value={input}
+                    onChange={(e) => {
+                      setInput(e.target.value);
+                      onTyping();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    placeholder={t("rooms.messagePlaceholder")}
+                    className="bg-card"
+                  />
+                  <Button size="icon" onClick={sendMessage} disabled={!input.trim()} className="bg-red-600 hover:bg-red-700">
+                    <Send className="size-4" />
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-center text-muted-foreground py-1">{t("rooms.needLogin")}</p>
+              )}
+            </div>
+          </Card>
+
+          {/* Members */}
+          <Card className="p-3">
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Users className="size-4" /> {t("rooms.membersTitle")}
+            </h3>
+            <ScrollArea className="max-h-48">
+              <div className="space-y-1.5">
+                {(members.length ? members : r.members.map((m) => ({ userId: m.user.id, username: m.user.username, isHost: m.role === "HOST" }))).map((m) => (
+                  <div key={m.userId} className="flex items-center gap-2">
+                    <UserAvatar username={m.username} size={26} />
+                    <span className="text-sm flex-1 truncate">{m.username}</span>
+                    {m.isHost && <Crown className="size-3.5 text-yellow-500" />}
+                    <Badge variant="outline" className="text-[10px]">
+                      {m.isHost ? t("rooms.host") : t("rooms.viewer")}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
