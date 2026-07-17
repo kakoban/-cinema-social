@@ -59,10 +59,12 @@ model Movie {
   rating      Float?
   genre       String?
   runtime     Int?
-  source      String   @default("TMDB") // TMDB | ARCHIVE | USER
+  source      String   @default("TMDB") // TMDB | ARCHIVE | USER | YOUTUBE | VIMEO | CUSTOM
   videoUrl    String?
   trailerUrl  String?
   archiveId   String?
+  youtubeId   String?  @unique
+  vimeoId     String?  @unique
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

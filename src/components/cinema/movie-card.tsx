@@ -62,6 +62,16 @@ export function MovieCard({ movie, className }: MovieCardProps) {
             Free
           </div>
         )}
+        {movie.source === "YOUTUBE" && (
+          <div className="absolute top-2 start-2 rounded-full bg-red-600/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+            YouTube
+          </div>
+        )}
+        {movie.source === "VIMEO" && (
+          <div className="absolute top-2 start-2 rounded-full bg-blue-600/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+            Vimeo
+          </div>
+        )}
       </div>
       <div className="p-2.5">
         <h3 className="text-sm font-medium line-clamp-1 text-card-foreground">
