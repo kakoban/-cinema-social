@@ -1,6 +1,6 @@
 export async function youtubeSearch(query: string, limit = 10) {
-  // Using Invidious API to search YouTube without an API key
-  const res = await fetch(`https://vid.puffyan.us/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance`);
+  // Using an alternative Invidious instance API since the previous one had SSL issues
+  const res = await fetch(`https://invidious.nerdvpn.de/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance`);
 
   if (!res.ok) return { results: [] };
   const data = await res.json();
@@ -18,7 +18,7 @@ export async function youtubeSearch(query: string, limit = 10) {
 
 export async function youtubeDetail(id: string) {
   const videoId = id.replace('yt_', '');
-  const res = await fetch(`https://vid.puffyan.us/api/v1/videos/${videoId}`);
+  const res = await fetch(`https://invidious.nerdvpn.de/api/v1/videos/${videoId}`);
 
   if (!res.ok) return null;
   const data = await res.json();

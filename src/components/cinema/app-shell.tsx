@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, Suspense } from "react";
+import { useEffect, Suspense, useState } from "react";
 import { Header } from "./header";
 import { Footer } from "./footer";
 import { useRouterStore, useNavigate } from "@/stores/router";
@@ -92,8 +92,10 @@ function Router() {
 export function AppShell() {
   const init = useRouterStore((s) => s.init);
   const bootstrap = useAuthStore((s) => s.bootstrap);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const cleanup = init();
     return cleanup;
   }, [init]);
@@ -101,6 +103,10 @@ export function AppShell() {
   useEffect(() => {
     bootstrap();
   }, [bootstrap]);
+
+  if (!mounted) {
+    return null; // Prevents SSR mismatch completely
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-background">

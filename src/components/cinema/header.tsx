@@ -26,7 +26,14 @@ import { cn } from "@/lib/utils";
 function NavLink({ to, label }: { to: string; label: string }) {
   const route = useRouterStore((s) => s.route);
   const navigate = useNavigate();
-  const active = route.path === to || route.path.startsWith(to + "/");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const active = mounted && (route.path === to || route.path.startsWith(to + "/"));
+
   return (
     <button
       onClick={() => navigate(to)}

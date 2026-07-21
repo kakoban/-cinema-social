@@ -211,15 +211,27 @@ export function MovieView({ id }: { id: string }) {
 
   // determine watch embed url
   let watchEmbed: string | null = null;
+  let streamEmbed: string | null = null;
+
+  if (m.tmdbId) {
+    // 3rd party stream embed provider (e.g. vidsrc)
+    streamEmbed = `https://vidsrc.to/embed/movie/${m.tmdbId}`;
+  }
+
   if (m.videoUrl) {
     if (m.source === "ARCHIVE" || m.videoUrl.includes("archive.org")) {
       const aid = m.archiveId || m.videoUrl.split("/").pop();
       watchEmbed = `https://archive.org/embed/${aid}`;
-    } else if (m.videoUrl.includes("youtube.com") || m.videoUrl.includes("youtu.be")) {
+    } else if (m.source === "YOUTUBE" || m.videoUrl.includes("youtube.com") || m.videoUrl.includes("youtu.be")) {
       const ytId = m.videoUrl.includes("youtu.be")
         ? m.videoUrl.split("/").pop()
-        : m.videoUrl.split("v=")[1]?.split("&")[0];
+        : m.videoUrl.split("v=")[1]?.split("&")[0] || m.videoUrl.split("/embed/")[1]?.split("?")[0];
       watchEmbed = `https://www.youtube.com/embed/${ytId}`;
+    } else if (m.source === "VIMEO" || m.videoUrl.includes("vimeo.com")) {
+      const vimId = m.videoUrl.split("/video/")[1]?.split("?")[0] || m.videoUrl.split("/").pop();
+      watchEmbed = `https://player.vimeo.com/video/${vimId}`;
+    } else {
+      watchEmbed = m.videoUrl;
     }
   }
 
@@ -281,8 +293,26 @@ export function MovieView({ id }: { id: string }) {
                 </Dialog>
               )}
 
+              {streamEmbed && !watchEmbed && (
+                <Dialog open={showTrailer && !!streamEmbed} onOpenChange={setShowTrailer}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-red-600 hover:bg-red-700 w-full">
+                      <Play className="size-4 me-2" /> Watch Free Stream
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black border-border">
+                    <div className="p-2 text-center text-xs text-muted-foreground bg-zinc-950 border-b border-border">
+                      Stream provided by 3rd party (vidsrc.to). We do not host this content.
+                    </div>
+                    <div className="aspect-video">
+                      <iframe src={streamEmbed} className="size-full" allowFullScreen allow="autoplay; fullscreen" />
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
+
               {m.trailerUrl && (
-                <Dialog open={showTrailer && !watchEmbed} onOpenChange={setShowTrailer}>
+                <Dialog open={showTrailer && !watchEmbed && !streamEmbed} onOpenChange={setShowTrailer}>
                   <DialogTrigger asChild>
                     <Button variant="outline" className="w-full">
                       <Youtube className="size-4 me-2" /> {t("movie.trailer")}

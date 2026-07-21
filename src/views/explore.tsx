@@ -92,7 +92,7 @@ export function ExploreView({ query, source }: { query?: string; source?: string
             onClick={() => handleSourceChange(s)}
             className={activeSource === s ? "bg-red-600 hover:bg-red-700" : ""}
           >
-            {s === "tmdb" ? "TMDB" : s === "archive" ? t("explore.archiveResults") : s === "youtube" ? "YouTube" : "Vimeo"}
+            {s === "tmdb" ? "New Movies (TMDB)" : s === "archive" ? t("explore.archiveResults") : s === "youtube" ? "YouTube" : "Vimeo"}
           </Button>
         ))}
       </div>
