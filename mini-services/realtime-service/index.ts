@@ -15,7 +15,7 @@ interface RoomMember {
   username: string;
   socketId: string;
   isHost: boolean;
-  hasVideo?: boolean;
+  isVideoChat?: boolean;
   isMuted?: boolean;
 }
 
@@ -100,7 +100,7 @@ io.on("connection", (socket: Socket) => {
       username,
       socketId: socket.id,
       isHost: wasHost,
-      hasVideo: false,
+      isVideoChat: false,
       isMuted: false,
     };
     const isNew = !room.members.has(userId);
@@ -149,39 +149,63 @@ io.on("connection", (socket: Socket) => {
     socket.to(data.roomId).emit("chat:typing", { userId: data.userId, username: data.username });
   });
 
-  socket.on("CMD:joinVideo", (data: { roomId: string; userId: string }) => {
-    const room = rooms.get(data.roomId);
-    if (!room) return;
-    const member = room.members.get(data.userId);
-    if (member) {
-      member.hasVideo = true;
-      broadcastMembers(data.roomId);
+  socket.on("CMD:joinVideo", () => {
+    for (const roomId of socketRooms) {
+      const userInfo = socketUser.get(roomId);
+      if (!userInfo) continue;
+      const room = rooms.get(roomId);
+      if (room) {
+        const member = room.members.get(userInfo.userId);
+        if (member) {
+          member.isVideoChat = true;
+          broadcastMembers(roomId);
+        }
+      }
     }
   });
 
-  socket.on("CMD:leaveVideo", (data: { roomId: string; userId: string }) => {
-    const room = rooms.get(data.roomId);
-    if (!room) return;
-    const member = room.members.get(data.userId);
-    if (member) {
-      member.hasVideo = false;
-      broadcastMembers(data.roomId);
+  socket.on("CMD:leaveVideo", () => {
+    for (const roomId of socketRooms) {
+      const userInfo = socketUser.get(roomId);
+      if (!userInfo) continue;
+      const room = rooms.get(roomId);
+      if (room) {
+        const member = room.members.get(userInfo.userId);
+        if (member) {
+          member.isVideoChat = false;
+          broadcastMembers(roomId);
+        }
+      }
     }
   });
 
-  socket.on("CMD:userMute", (data: { roomId: string; userId: string; isMuted: boolean }) => {
-    const room = rooms.get(data.roomId);
-    if (!room) return;
-    const member = room.members.get(data.userId);
-    if (member) {
-      member.isMuted = data.isMuted;
-      broadcastMembers(data.roomId);
+  socket.on("CMD:userMute", (data: { isMuted: boolean }) => {
+    for (const roomId of socketRooms) {
+      const userInfo = socketUser.get(roomId);
+      if (!userInfo) continue;
+      const room = rooms.get(roomId);
+      if (room) {
+        const member = room.members.get(userInfo.userId);
+        if (member) {
+          member.isMuted = data.isMuted;
+          broadcastMembers(roomId);
+        }
+      }
     }
   });
 
-  socket.on("signal", (data: { to: string; from: string; msg: unknown }) => {
-    // Forward the WebRTC signal to the target socket
-    io.to(data.to).emit("signal", { from: data.from, msg: data.msg });
+  socket.on("signal", (data: { to: string; msg: unknown }) => {
+    for (const roomId of socketRooms) {
+      const room = rooms.get(roomId);
+      if (!room) continue;
+      const targetMember = room.members.get(data.to);
+      const senderInfo = socketUser.get(roomId);
+      if (targetMember && senderInfo) {
+        io.to(targetMember.socketId).emit("signal", { from: senderInfo.userId, msg: data.msg });
+        break;
+      }
+    }
+  });
   });
 
   // Host -> server -> broadcast (with server timestamp for drift compensation)
