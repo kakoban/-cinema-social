@@ -15,6 +15,8 @@ interface RoomMember {
   username: string;
   socketId: string;
   isHost: boolean;
+  hasVideo?: boolean;
+  isMuted?: boolean;
 }
 
 interface RoomPlaybackState {
@@ -98,6 +100,8 @@ io.on("connection", (socket: Socket) => {
       username,
       socketId: socket.id,
       isHost: wasHost,
+      hasVideo: false,
+      isMuted: false,
     };
     const isNew = !room.members.has(userId);
     room.members.set(userId, member);
