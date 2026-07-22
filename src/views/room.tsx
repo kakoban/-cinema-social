@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Loader2,
   Film,
+  Music,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { useNavigate } from "@/stores/router";
 import { useAuthStore } from "@/stores/auth-store";
@@ -72,7 +74,7 @@ interface RoomDetail {
 function videoKind(url: string | null): "direct" | "youtube" | "archive" | "vimeo" | "none" {
   if (!url) return "none";
   const u = url.toLowerCase();
-  if (u.includes("archive.org/download/") || /\.(mp4|ogv|webm|m4v|mpeg|mpg)(\?|$)/.test(u)) return "direct";
+  if (u.includes("archive.org/download/") || /\.(mp4|ogv|webm|m4v|mpeg|mpg|mp3|wav|ogg|m4a|aac)(\?|$)/.test(u)) return "direct";
   if (u.includes("youtube.com/watch") || u.includes("youtube.com/embed") || u.includes("youtu.be")) return "youtube";
   if (u.includes("archive.org/embed")) return "archive";
   if (u.includes("vimeo.com")) return "vimeo";
@@ -103,10 +105,61 @@ export function RoomView({ id }: { id: string }) {
   const [playback, setPlayback] = useState({ currentTime: 0, isPlaying: false });
   const [hostOffline, setHostOffline] = useState(false);
   const [joined, setJoined] = useState(false);
+  const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
+  const [localFileName, setLocalFileName] = useState<string | null>(null);
+  const [localFileFingerprint, setLocalFileFingerprint] = useState<string | null>(null);
+  const [expectedFileName, setExpectedFileName] = useState<string | null>(null);
+  const [expectedFingerprint, setExpectedFingerprint] = useState<string | null>(null);
+  const [fingerprintMismatch, setFingerprintMismatch] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const isHostRef = useRef(false);
+  const localFileNameRef = useRef<string | null>(null);
+  const localFingerprintRef = useRef<string | null>(null);
   const lastSyncEmit = useRef(0);
+
+  useEffect(() => { localFileNameRef.current = localFileName; }, [localFileName]);
+  useEffect(() => { localFingerprintRef.current = localFileFingerprint; }, [localFileFingerprint]);
+  useEffect(() => () => { if (localVideoUrl) URL.revokeObjectURL(localVideoUrl); }, [localVideoUrl]);
+
+  // Fast file fingerprint: hash first 1MB + last 1MB + file size
+  async function computeFingerprint(file: File): Promise<string> {
+    const CHUNK = 1024 * 1024; // 1MB
+    const head = file.slice(0, CHUNK);
+    const tail = file.slice(Math.max(0, file.size - CHUNK));
+    const combined = new Uint8Array(await new Blob([head, tail]).arrayBuffer());
+    const hash = await crypto.subtle.digest("SHA-256", combined);
+    const hex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 16)}_${file.size}`;
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (localVideoUrl) URL.revokeObjectURL(localVideoUrl);
+
+    const url = URL.createObjectURL(file);
+    const fp = await computeFingerprint(file);
+    setLocalVideoUrl(url);
+    setLocalFileName(file.name);
+    setLocalFileFingerprint(fp);
+    setFingerprintMismatch(false);
+
+    // Check fingerprint match if we're a viewer
+    if (!isHostRef.current && expectedFingerprint && fp !== expectedFingerprint) {
+      setFingerprintMismatch(true);
+    } else {
+      setFingerprintMismatch(false);
+    }
+
+    if (isHostRef.current && socket) {
+      socket.emit("chat:message", {
+        roomId: id,
+        content: `__LOCAL_FILE__:${file.name}|${fp}`,
+        type: "SYSTEM",
+      });
+    }
+  };
   const driftFixing = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,7 +174,9 @@ export function RoomView({ id }: { id: string }) {
     (targetTime: number, targetPlaying: boolean, serverTs: number) => {
       const v = videoRef.current;
       if (!v || isHostRef.current) return;
-      const kind = videoKind(room.data?.movie?.videoUrl || null);
+      // Allow sync for both direct network videos and local blob files
+      const effectiveUrl = localVideoUrl || room.data?.movie?.videoUrl || null;
+      const kind = videoKind(effectiveUrl);
       if (kind !== "direct") return;
 
       // compensate for transit time
@@ -187,6 +242,23 @@ export function RoomView({ id }: { id: string }) {
       });
 
       sock.on("chat:message", (msg: ChatMessage) => {
+        // Intercept local file system messages
+        if (msg.type === "SYSTEM" && msg.content.startsWith("__LOCAL_FILE__:")) {
+          const payload = msg.content.replace("__LOCAL_FILE__:", "");
+          const [fname, fp] = payload.split("|");
+          if (!isHostRef.current) {
+            setExpectedFileName(fname);
+            if (fp) setExpectedFingerprint(fp);
+
+            // Check if viewer already loaded a file but it's the wrong one
+            if (localFingerprintRef.current && fp && localFingerprintRef.current !== fp) {
+              setFingerprintMismatch(true);
+            } else if (localFingerprintRef.current && fp === localFingerprintRef.current) {
+              setFingerprintMismatch(false);
+            }
+          }
+          return;
+        }
         setMessages((prev) => [...prev, msg]);
       });
       sock.on("chat:typing", (data: { userId: string; username: string }) => {
@@ -214,6 +286,15 @@ export function RoomView({ id }: { id: string }) {
             currentTime: videoRef.current.currentTime,
             isPlaying: !videoRef.current.paused,
           });
+          // Also tell late joiner about local file if one is selected
+          if (localFileNameRef.current) {
+            const fp = localFingerprintRef.current ? `|${localFingerprintRef.current}` : "";
+            sock!.emit("chat:message", {
+              roomId: id,
+              content: `__LOCAL_FILE__:${localFileNameRef.current}${fp}`,
+              type: "SYSTEM",
+            });
+          }
         }
       });
       sock.on("room:full", () => {
@@ -375,9 +456,13 @@ export function RoomView({ id }: { id: string }) {
   }
 
   const r = room.data;
-  const videoUrl = r.movie?.videoUrl;
-  const kind = videoKind(videoUrl || null);
+  // Use local file if available, otherwise use the room movie URL
+  const videoUrl = localVideoUrl || r.movie?.videoUrl;
+  const kind = localVideoUrl ? "direct" as const : videoKind(r.movie?.videoUrl || null);
   const ytId = kind === "youtube" && videoUrl ? youtubeId(videoUrl) : null;
+  const isAudio = localFileName
+    ? /\.(mp3|wav|ogg|m4a|aac)$/i.test(localFileName)
+    : (r.movie?.videoUrl ? /\.(mp3|wav|ogg|m4a|aac)(\?|$)/i.test(r.movie.videoUrl) : false);
 
   const typingList = Object.values(typingUsers).filter((tp) => tp.username !== user?.username);
 
@@ -422,7 +507,31 @@ export function RoomView({ id }: { id: string }) {
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Player */}
         <div className="lg:col-span-2 space-y-4">
-          <Card className="p-0 overflow-hidden bg-black">
+          <Card className="p-0 overflow-hidden bg-black relative">
+            {/* Overlay: Host is playing local file, viewer hasn't selected yet or selected wrong file */}
+            {expectedFileName && !isHost && (!localVideoUrl || fingerprintMismatch) && (
+              <div className="absolute inset-0 z-20 bg-black/95 flex flex-col items-center justify-center p-8 text-center">
+                <Film className="size-12 text-red-500 mb-4" />
+                <p className="text-white text-lg font-semibold mb-2">Host is playing a local file</p>
+                <p className="text-white/70 text-sm mb-4">
+                  <strong className="text-yellow-400">{expectedFileName}</strong>
+                </p>
+                {fingerprintMismatch ? (
+                  <p className="text-red-500 text-sm mb-4" dir="rtl">
+                    <AlertCircle className="size-4 inline me-1" />
+                    فایل انتخاب شده توسط شما با فایل میزبان تفاوت دارد (محتوا یکسان نیست). لطفاً فایل درست را انتخاب کنید.
+                  </p>
+                ) : (
+                  <p className="text-white/50 text-xs mb-4" dir="rtl">
+                    لطفاً همین فایل را از کامپیوتر خود انتخاب کنید تا پخش هماهنگ شروع شود.
+                  </p>
+                )}
+                <label className="cursor-pointer bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                  <Video className="size-4" /> Select File
+                  <input type="file" accept="video/mp4,video/webm,video/ogg,audio/*" onChange={handleFileChange} className="hidden" />
+                </label>
+              </div>
+            )}
             {kind === "none" ? (
               <div className="aspect-video flex flex-col items-center justify-center text-center p-8">
                 <Video className="size-12 text-muted-foreground mb-3" />
@@ -431,10 +540,19 @@ export function RoomView({ id }: { id: string }) {
               </div>
             ) : kind === "direct" ? (
               <div className="relative">
+                {isAudio && (
+                  <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center pointer-events-none z-10">
+                    <div className="size-24 rounded-full bg-primary/20 flex items-center justify-center mb-4 animate-pulse">
+                      <Music className="size-10 text-primary" />
+                    </div>
+                    <p className="text-muted-foreground text-sm font-medium">Playing Audio</p>
+                    <p className="text-muted-foreground/50 text-xs mt-1">{localFileName || "Synced stream"}</p>
+                  </div>
+                )}
                 <video
                   ref={videoRef}
                   src={videoUrl!}
-                  className="aspect-video w-full bg-black"
+                  className={`w-full bg-black ${isAudio ? "h-32" : "aspect-video"}`}
                   controls={isHost}
                   playsInline
                   onPlay={emitSync}
@@ -511,6 +629,50 @@ export function RoomView({ id }: { id: string }) {
               {t("rooms.syncedPlayback")} · {t("rooms.hostControls")}
             </Card>
           )}
+
+          {/* Local File Sync */}
+          <Card className="p-4">
+            <h3 className="font-semibold mb-3 flex items-center gap-2">
+              <Film className="size-4 text-primary" /> Local File Sync
+            </h3>
+            <p className="text-xs text-muted-foreground mb-3" dir="rtl">
+              فایل ویدیویی خود را از هارد انتخاب کنید. زمان پخش بین تمام اعضا هماهنگ می‌شود. هیچ فایلی آپلود نمی‌شود.
+            </p>
+            <label className="flex items-center justify-center gap-2 cursor-pointer border border-dashed border-border rounded-lg p-4 hover:border-primary/50 hover:bg-primary/5 transition">
+              <Video className="size-5 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">
+                {localFileName || "Select video file (mp4, webm, ogg)"}
+              </span>
+              <input
+                type="file"
+                accept="video/mp4,video/webm,video/ogg,audio/mp3,audio/mpeg,audio/ogg"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+            </label>
+            {localFileName && !fingerprintMismatch && (
+              <p className="text-xs text-green-500 mt-2 flex items-center gap-1">
+                <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                Loaded: {localFileName}
+              </p>
+            )}
+            {fingerprintMismatch && (
+              <p className="text-xs text-red-500 mt-2 flex items-center gap-1" dir="rtl">
+                <AlertCircle className="size-4" />
+                خطا: محتوای فایل شما با فایل میزبان یکسان نیست!
+              </p>
+            )}
+            {expectedFileName && !isHost && localFileName !== expectedFileName && !fingerprintMismatch && (
+              <div className="mt-3 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-center">
+                <p className="text-sm text-yellow-500 mb-2 font-medium">
+                  🎬 Host is playing: <strong>{expectedFileName}</strong>
+                </p>
+                <p className="text-xs text-yellow-500/70" dir="rtl">
+                  لطفاً همین فایل را از کامپیوتر خود انتخاب کنید تا همگام‌سازی شروع شود.
+                </p>
+              </div>
+            )}
+          </Card>
 
           {/* Movie info */}
           {r.movie && (

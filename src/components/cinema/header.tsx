@@ -21,6 +21,7 @@ import { UserAvatar } from "./user-avatar";
 import { ThemeToggle } from "./theme-toggle";
 import { LangToggle } from "./lang-toggle";
 import { NotificationBell } from "./notification-bell";
+import { AddCustomMovie } from "./add-custom-movie";
 import { cn } from "@/lib/utils";
 
 function NavLink({ to, label }: { to: string; label: string }) {
@@ -76,6 +77,7 @@ export function Header() {
     <>
       <NavLink to="/" label={t("nav.home")} />
       <NavLink to="/explore" label={t("nav.explore")} />
+      <NavLink to="/platforms" label="Free Platforms" />
       <NavLink to="/rooms" label={t("nav.rooms")} />
       {user && <NavLink to="/watchlist" label={t("nav.watchlist")} />}
     </>
@@ -119,6 +121,11 @@ export function Header() {
 
         {/* Right controls */}
         <div className="flex items-center gap-1">
+          {mounted && user && (
+            <div className="hidden lg:block me-2">
+              <AddCustomMovie />
+            </div>
+          )}
           <div className="hidden sm:flex items-center gap-1">
             <LangToggle />
             <ThemeToggle />

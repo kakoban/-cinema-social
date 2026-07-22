@@ -85,18 +85,29 @@ export function MovieView({ id }: { id: string }) {
 
   const movie = useQuery<MovieDetail>({
     queryKey: ["movie", id],
-    queryFn: () => api.get<MovieDetail>(`/api/movies/${id}`).then((r) => r.data!),
+    queryFn: async () => {
+      const r = await api.get<MovieDetail>(`/api/movies/${id}`);
+      if (!r.success || !r.data) throw new Error(r.error || "Movie not found");
+      return r.data;
+    },
+    retry: false,
   });
 
   const reviews = useQuery<Review[]>({
     queryKey: ["movie-reviews", movie.data?.id],
-    queryFn: () => api.get<Review[]>(`/api/movies/${movie.data!.id}/reviews`).then((r) => r.data!),
+    queryFn: async () => {
+      const r = await api.get<Review[]>(`/api/movies/${movie.data!.id}/reviews`);
+      return r.data || [];
+    },
     enabled: !!movie.data?.id,
   });
 
   const watchlists = useQuery<Watchlist[]>({
     queryKey: ["watchlists"],
-    queryFn: () => api.get<Watchlist[]>("/api/watchlists").then((r) => r.data!),
+    queryFn: async () => {
+      const r = await api.get<Watchlist[]>("/api/watchlists");
+      return r.data || [];
+    },
     enabled: !!user,
   });
 
@@ -214,8 +225,8 @@ export function MovieView({ id }: { id: string }) {
   let streamEmbed: string | null = null;
 
   if (m.tmdbId) {
-    // 3rd party stream embed provider (e.g. vidsrc)
-    streamEmbed = `https://vidsrc.to/embed/movie/${m.tmdbId}`;
+    // ponytail: single provider; add UI provider-switcher when more needed
+    streamEmbed = `https://vidsrc.me/embed/movie?tmdb=${m.tmdbId}`;
   }
 
   if (m.videoUrl) {
@@ -300,12 +311,20 @@ export function MovieView({ id }: { id: string }) {
                       <Play className="size-4 me-2" /> Watch Free Stream
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black border-border">
-                    <div className="p-2 text-center text-xs text-muted-foreground bg-zinc-950 border-b border-border">
-                      Stream provided by 3rd party (vidsrc.to). We do not host this content.
+                  <DialogContent className="max-w-5xl p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-[0_0_50px_-12px_rgba(220,38,38,0.3)] sm:rounded-2xl">
+                    <div className="p-3 text-center text-xs text-muted-foreground bg-gradient-to-b from-black/80 to-transparent border-b border-white/5 flex flex-col gap-1.5 relative z-10">
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="flex h-2 w-2 rounded-full bg-red-600 animate-pulse"></span>
+                        <span className="font-medium text-white/80 tracking-wide uppercase">Free Streaming Mode</span>
+                      </div>
+                      <span className="text-white/40">Provided by external servers. We do not host this content.</span>
+                      <span className="text-yellow-500/80 mt-1">💡 If it doesn't load or buffers, select a different server (like Xps, Vesy) from the player menu.</span>
                     </div>
-                    <div className="aspect-video">
-                      <iframe src={streamEmbed} className="size-full" allowFullScreen allow="autoplay; fullscreen" />
+                    <div className="aspect-video w-full bg-black relative">
+                      <div className="absolute inset-0 flex items-center justify-center -z-10">
+                        <Loader2 className="size-8 animate-spin text-red-600/50" />
+                      </div>
+                      <iframe src={streamEmbed} className="size-full absolute inset-0" allowFullScreen allow="autoplay; fullscreen" />
                     </div>
                   </DialogContent>
                 </Dialog>

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { MovieCard, MovieCardSkeleton } from "@/components/cinema/movie-card";
+import { AddCustomMovie } from "@/components/cinema/add-custom-movie";
 import { api } from "@/lib/api-client";
 import { useNavigate } from "@/stores/router";
 import { useI18n } from "@/i18n";
@@ -62,9 +63,12 @@ export function ExploreView({ query, source }: { query?: string; source?: string
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold mb-1">{t("explore.title")}</h1>
-        <p className="text-muted-foreground text-sm">{t("explore.subtitle")}</p>
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold mb-1">{t("explore.title")}</h1>
+          <p className="text-muted-foreground text-sm">{t("explore.subtitle")}</p>
+        </div>
+        <AddCustomMovie />
       </div>
 
       <form onSubmit={onSubmit} className="mb-6">

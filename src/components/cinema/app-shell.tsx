@@ -19,6 +19,7 @@ import { ProfileView } from "@/views/profile";
 import { WatchlistView } from "@/views/watchlist";
 import { SettingsView } from "@/views/settings";
 import { AdminView } from "@/views/admin";
+import { PlatformsView } from "@/views/platforms";
 
 function Router() {
   const route = useRouterStore((s) => s.route);
@@ -54,6 +55,8 @@ function Router() {
     view = <SettingsView />;
   } else if (segments[0] === "admin") {
     view = <AdminView />;
+  } else if (segments[0] === "platforms") {
+    view = <PlatformsView />;
   } else {
     view = (
       <div className="flex-1 flex flex-col items-center justify-center py-24 text-center px-4">

@@ -1,0 +1,231 @@
+diff --git a/.env b/.env
+index d17c70b..a5eb854 100644
+--- a/.env
++++ b/.env
+@@ -1,5 +1,5 @@
+-DATABASE_URL=file:/home/z/my-project/db/custom.db
++DATABASE_URL="file:../db/custom.db"
+ JWT_SECRET=cinema-social-super-secret-key-change-in-production-2024
+ JWT_ACCESS_EXPIRES=15m
+ JWT_REFRESH_EXPIRES=7d
+-TMDB_API_KEY=
++TMDB_API_KEY=8e2be4aa080a70388e9d3514dcc73339
+diff --git a/db/custom.db b/db/custom.db
+index f1698ef..9cfd315 100644
+Binary files a/db/custom.db and b/db/custom.db differ
+diff --git a/package.json b/package.json
+index 30242ad..89b89c5 100644
+--- a/package.json
++++ b/package.json
+@@ -3,7 +3,7 @@
+   "version": "0.2.0",
+   "private": true,
+   "scripts": {
+-    "dev": "next dev -p 3000 2>&1 | tee dev.log",
++    "dev": "cross-env TURBOPACK=0 next dev -p 3000",
+     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
+     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+     "lint": "eslint .",
+@@ -53,6 +53,7 @@
+     "class-variance-authority": "^0.7.1",
+     "clsx": "^2.1.1",
+     "cmdk": "^1.1.1",
++    "cross-env": "^10.1.0",
+     "date-fns": "^4.1.0",
+     "embla-carousel-react": "^8.6.0",
+     "framer-motion": "^12.23.2",
+diff --git a/src/app/api/movies/[id]/route.ts b/src/app/api/movies/[id]/route.ts
+index a01cdac..c663679 100644
+--- a/src/app/api/movies/[id]/route.ts
++++ b/src/app/api/movies/[id]/route.ts
+@@ -10,48 +10,56 @@ export async function GET(
+   _req: NextRequest,
+   { params }: { params: Promise<{ id: string }> }
+ ) {
+-  const { id } = await params;
++  try {
++    const { id } = await params;
+ 
+-  // Try local DB first (cuid)
+-  let movie = await db.movie.findUnique({ where: { id } });
++    // Try local DB first (cuid)
++    let movie = await db.movie.findUnique({ where: { id } });
+ 
+-  if (!movie) {
+-    if (id.startsWith('yt_')) {
+-      movie = await ensureMovieFromYoutube(id);
+-    } else if (id.startsWith('vim_')) {
+-      movie = await ensureMovieFromVimeo(id);
+-    } else {
+-      const tmdbId = parseInt(id, 10);
+-      if (!isNaN(tmdbId)) {
+-        movie = await ensureMovieFromTmdb(tmdbId);
+-      }
+-      if (!movie) {
+-        movie = await ensureMovieFromArchive(id);
++    if (!movie) {
++      if (id.startsWith('yt_')) {
++        movie = await ensureMovieFromYoutube(id);
++      } else if (id.startsWith('vim_')) {
++        movie = await ensureMovieFromVimeo(id);
++      } else {
++        const tmdbId = parseInt(id, 10);
++        if (!isNaN(tmdbId)) {
++          movie = await ensureMovieFromTmdb(tmdbId);
++        }
++        if (!movie) {
++          movie = await ensureMovieFromArchive(id);
++        }
+       }
+     }
+-  }
+ 
+-  if (!movie) return notFound("Movie not found");
++    if (!movie) return notFound("Movie not found");
+ 
+-  // If TMDB source and no trailer yet, try to fetch
+-  if (movie.tmdbId && !movie.trailerUrl) {
+-    const trailer = await tmdbTrailer(movie.tmdbId);
+-    if (trailer) {
+-      movie = await db.movie.update({
+-        where: { id: movie.id },
+-        data: { trailerUrl: trailer },
+-      });
++    // If TMDB source and no trailer yet, try to fetch
++    if (movie.tmdbId && !movie.trailerUrl) {
++      const trailer = await tmdbTrailer(movie.tmdbId);
++      if (trailer) {
++        movie = await db.movie.update({
++          where: { id: movie.id },
++          data: { trailerUrl: trailer },
++        });
++      }
+     }
+-  }
+ 
+-  // aggregate local review stats
+-  const reviews = await db.review.findMany({
+-    where: { movieId: movie.id },
+-    select: { rating: true },
+-  });
+-  const avgRating = reviews.length
+-    ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
+-    : null;
++    // aggregate local review stats
++    const reviews = await db.review.findMany({
++      where: { movieId: movie.id },
++      select: { rating: true },
++    });
++    const avgRating = reviews.length
++      ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
++      : null;
+ 
+-  return ok({ ...movie, avgRating, reviewCount: reviews.length });
++    return ok({ ...movie, avgRating, reviewCount: reviews.length });
++  } catch (error: any) {
++    console.error("GET /api/movies/[id] Error:", error);
++    return new Response(JSON.stringify({ error: error.message || "Internal server error" }), {
++      status: 500,
++      headers: { "Content-Type": "application/json" }
++    });
++  }
+ }
+diff --git a/src/components/cinema/app-shell.tsx b/src/components/cinema/app-shell.tsx
+index 8c14333..0d3619e 100644
+--- a/src/components/cinema/app-shell.tsx
++++ b/src/components/cinema/app-shell.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useEffect, Suspense } from "react";
++import { useEffect, Suspense, useState } from "react";
+ import { Header } from "./header";
+ import { Footer } from "./footer";
+ import { useRouterStore, useNavigate } from "@/stores/router";
+@@ -92,8 +92,10 @@ function Router() {
+ export function AppShell() {
+   const init = useRouterStore((s) => s.init);
+   const bootstrap = useAuthStore((s) => s.bootstrap);
++  const [mounted, setMounted] = useState(false);
+ 
+   useEffect(() => {
++    setMounted(true);
+     const cleanup = init();
+     return cleanup;
+   }, [init]);
+@@ -102,6 +104,10 @@ export function AppShell() {
+     bootstrap();
+   }, [bootstrap]);
+ 
++  if (!mounted) {
++    return null; // Prevents SSR mismatch completely
++  }
++
+   return (
+     <div className="min-h-screen flex flex-col bg-background">
+       <Header />
+diff --git a/src/components/cinema/header.tsx b/src/components/cinema/header.tsx
+index 5b4be5d..3260406 100644
+--- a/src/components/cinema/header.tsx
++++ b/src/components/cinema/header.tsx
+@@ -26,7 +26,14 @@ import { cn } from "@/lib/utils";
+ function NavLink({ to, label }: { to: string; label: string }) {
+   const route = useRouterStore((s) => s.route);
+   const navigate = useNavigate();
+-  const active = route.path === to || route.path.startsWith(to + "/");
++  const [mounted, setMounted] = useState(false);
++
++  useEffect(() => {
++    setMounted(true);
++  }, []);
++
++  const active = mounted && (route.path === to || route.path.startsWith(to + "/"));
++
+   return (
+     <button
+       onClick={() => navigate(to)}
+diff --git a/src/lib/youtube.ts b/src/lib/youtube.ts
+index eb33056..5dfeb6b 100644
+--- a/src/lib/youtube.ts
++++ b/src/lib/youtube.ts
+@@ -1,6 +1,6 @@
+ export async function youtubeSearch(query: string, limit = 10) {
+-  // Using Invidious API to search YouTube without an API key
+-  const res = await fetch(`https://vid.puffyan.us/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance`);
++  // Using an alternative Invidious instance API since the previous one had SSL issues
++  const res = await fetch(`https://invidious.nerdvpn.de/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance`);
+ 
+   if (!res.ok) return { results: [] };
+   const data = await res.json();
+@@ -18,7 +18,7 @@ export async function youtubeSearch(query: string, limit = 10) {
+ 
+ export async function youtubeDetail(id: string) {
+   const videoId = id.replace('yt_', '');
+-  const res = await fetch(`https://vid.puffyan.us/api/v1/videos/${videoId}`);
++  const res = await fetch(`https://invidious.nerdvpn.de/api/v1/videos/${videoId}`);
+ 
+   if (!res.ok) return null;
+   const data = await res.json();
+diff --git a/src/views/movie.tsx b/src/views/movie.tsx
+index 04d9704..eb3eb49 100644
+--- a/src/views/movie.tsx
++++ b/src/views/movie.tsx
+@@ -215,11 +215,16 @@ export function MovieView({ id }: { id: string }) {
+     if (m.source === "ARCHIVE" || m.videoUrl.includes("archive.org")) {
+       const aid = m.archiveId || m.videoUrl.split("/").pop();
+       watchEmbed = `https://archive.org/embed/${aid}`;
+-    } else if (m.videoUrl.includes("youtube.com") || m.videoUrl.includes("youtu.be")) {
++    } else if (m.source === "YOUTUBE" || m.videoUrl.includes("youtube.com") || m.videoUrl.includes("youtu.be")) {
+       const ytId = m.videoUrl.includes("youtu.be")
+         ? m.videoUrl.split("/").pop()
+-        : m.videoUrl.split("v=")[1]?.split("&")[0];
++        : m.videoUrl.split("v=")[1]?.split("&")[0] || m.videoUrl.split("/embed/")[1]?.split("?")[0];
+       watchEmbed = `https://www.youtube.com/embed/${ytId}`;
++    } else if (m.source === "VIMEO" || m.videoUrl.includes("vimeo.com")) {
++      const vimId = m.videoUrl.split("/video/")[1]?.split("?")[0] || m.videoUrl.split("/").pop();
++      watchEmbed = `https://player.vimeo.com/video/${vimId}`;
++    } else {
++      watchEmbed = m.videoUrl;
+     }
+   }
+ 

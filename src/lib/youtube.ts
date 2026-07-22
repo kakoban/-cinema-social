@@ -1,8 +1,27 @@
-export async function youtubeSearch(query: string, limit = 10) {
-  // Using an alternative Invidious instance API since the previous one had SSL issues
-  const res = await fetch(`https://invidious.nerdvpn.de/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance`);
+// ponytail: static list; swap for https://api.invidious.io/instances.json when needed
+const INVIDIOUS_INSTANCES = [
+  "https://invidious.nerdvpn.de",
+  "https://inv.nadeko.net",
+  "https://invidious.privacyredirect.com",
+  "https://invidious.protokolla.fi",
+];
 
-  if (!res.ok) return { results: [] };
+async function invidiousFetch(path: string): Promise<Response | null> {
+  for (const base of INVIDIOUS_INSTANCES) {
+    try {
+      const res = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(8000) });
+      if (res.ok) return res;
+    } catch {
+      // try next instance
+    }
+  }
+  return null;
+}
+
+export async function youtubeSearch(query: string, limit = 10) {
+  const res = await invidiousFetch(`/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance`);
+
+  if (!res) return { results: [] };
   const data = await res.json();
 
   return {
@@ -18,9 +37,9 @@ export async function youtubeSearch(query: string, limit = 10) {
 
 export async function youtubeDetail(id: string) {
   const videoId = id.replace('yt_', '');
-  const res = await fetch(`https://invidious.nerdvpn.de/api/v1/videos/${videoId}`);
+  const res = await invidiousFetch(`/api/v1/videos/${videoId}`);
 
-  if (!res.ok) return null;
+  if (!res) return null;
   const data = await res.json();
 
   return {

@@ -13,7 +13,6 @@ import { api } from "@/lib/api-client";
 import { useNavigate } from "@/stores/router";
 import { useAuthStore } from "@/stores/auth-store";
 import { useI18n } from "@/i18n";
-import { hasTmdbKey } from "@/lib/tmdb";
 
 interface TrendingMovie {
   tmdbId: number;
@@ -49,7 +48,6 @@ export function HomeView() {
   const { t } = useI18n();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const tmdbConfigured = hasTmdbKey();
 
   const trending = useQuery<{ results: TrendingMovie[]; configured: boolean }>({
     queryKey: ["trending"],
@@ -121,7 +119,7 @@ export function HomeView() {
 
       <div className="max-w-7xl mx-auto px-4 py-10 space-y-12">
         {/* TMDB setup banner */}
-        {!tmdbConfigured && (
+        {trending.data && !trending.data.configured && (
           <Card className="border-yellow-500/30 bg-yellow-500/5 p-5">
             <div className="flex gap-3">
               <AlertTriangle className="size-5 text-yellow-500 shrink-0 mt-0.5" />
@@ -173,7 +171,7 @@ export function HomeView() {
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              {tmdbConfigured ? t("noResults") : "—"}
+              {trending.data?.configured ? t("noResults") : "—"}
             </p>
           )}
         </section>
