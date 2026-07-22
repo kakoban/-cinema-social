@@ -149,6 +149,41 @@ io.on("connection", (socket: Socket) => {
     socket.to(data.roomId).emit("chat:typing", { userId: data.userId, username: data.username });
   });
 
+  socket.on("CMD:joinVideo", (data: { roomId: string; userId: string }) => {
+    const room = rooms.get(data.roomId);
+    if (!room) return;
+    const member = room.members.get(data.userId);
+    if (member) {
+      member.hasVideo = true;
+      broadcastMembers(data.roomId);
+    }
+  });
+
+  socket.on("CMD:leaveVideo", (data: { roomId: string; userId: string }) => {
+    const room = rooms.get(data.roomId);
+    if (!room) return;
+    const member = room.members.get(data.userId);
+    if (member) {
+      member.hasVideo = false;
+      broadcastMembers(data.roomId);
+    }
+  });
+
+  socket.on("CMD:userMute", (data: { roomId: string; userId: string; isMuted: boolean }) => {
+    const room = rooms.get(data.roomId);
+    if (!room) return;
+    const member = room.members.get(data.userId);
+    if (member) {
+      member.isMuted = data.isMuted;
+      broadcastMembers(data.roomId);
+    }
+  });
+
+  socket.on("signal", (data: { to: string; from: string; msg: unknown }) => {
+    // Forward the WebRTC signal to the target socket
+    io.to(data.to).emit("signal", { from: data.from, msg: data.msg });
+  });
+
   // Host -> server -> broadcast (with server timestamp for drift compensation)
   socket.on("playback:sync", (data: { roomId: string; currentTime: number; isPlaying: boolean }) => {
     const room = rooms.get(data.roomId);

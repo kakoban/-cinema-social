@@ -171,7 +171,7 @@ export class HTMLPlayer implements Player {
 
   getTimeRanges = (): { start: number; end: number }[] => {
     const el = this.getVideoEl();
-    const buffers = [];
+    const buffers: { start: number; end: number }[] = [];
     if (el) {
       const rangeCount = el.buffered.length;
       for (let i = 0; i < rangeCount; i++) {
