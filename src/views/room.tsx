@@ -116,6 +116,8 @@ export function RoomView({ id }: { id: string }) {
   const [fingerprintMismatch, setFingerprintMismatch] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<Player | null>(null);
+  const ytPlayerInstance = useRef<any>(null);
   const isHostRef = useRef(false);
   const localFileNameRef = useRef<string | null>(null);
   const localFingerprintRef = useRef<string | null>(null);
@@ -172,41 +174,55 @@ export function RoomView({ id }: { id: string }) {
     isHostRef.current = isHost;
   }, [isHost]);
 
+  // Set up the player interface based on the active player type
+  useEffect(() => {
+    const effectiveUrl = localVideoUrl || room.data?.movie?.videoUrl || null;
+    const kind = videoKind(effectiveUrl);
+
+    if (kind === "direct") {
+      playerRef.current = new HTMLPlayer("main-video-player");
+    } else if (kind === "youtube" && ytPlayerInstance.current) {
+      playerRef.current = new YouTubePlayer(ytPlayerInstance.current, "main-youtube-player");
+    }
+  }, [localVideoUrl, room.data?.movie?.videoUrl]);
+
   // Drift-correction for viewers (native video only)
   const applyViewerSync = useCallback(
     (targetTime: number, targetPlaying: boolean, serverTs: number) => {
-      const v = videoRef.current;
-      if (!v || isHostRef.current) return;
+      const p = playerRef.current;
+      if (!p || isHostRef.current) return;
+
       // Allow sync for both direct network videos and local blob files
       const effectiveUrl = localVideoUrl || room.data?.movie?.videoUrl || null;
       const kind = videoKind(effectiveUrl);
-      if (kind !== "direct") return;
+      if (kind !== "direct" && kind !== "youtube") return;
 
       // compensate for transit time
       const elapsed = targetPlaying ? (Date.now() - serverTs) / 1000 : 0;
       const effective = targetTime + elapsed;
-      const diff = v.currentTime - effective;
+      const diff = p.getCurrentTime() - effective;
 
       if (Math.abs(diff) > 5) {
         // hard seek
-        v.currentTime = effective;
+        p.seekVideo(effective);
         driftFixing.current = false;
       } else if (Math.abs(diff) > 1.5) {
         // nudge playback rate
         driftFixing.current = true;
-        v.playbackRate = diff > 0 ? 0.97 : 1.03;
+        p.setPlaybackRate(diff > 0 ? 0.97 : 1.03);
       } else {
         driftFixing.current = false;
-        v.playbackRate = 1;
+        p.setPlaybackRate(1);
       }
 
-      if (targetPlaying && v.paused) {
-        v.play().catch(() => null);
-      } else if (!targetPlaying && !v.paused) {
-        v.pause();
+      const isActuallyPlaying = !p.shouldPlay();
+      if (targetPlaying && !isActuallyPlaying) {
+        p.playVideo().catch(() => null);
+      } else if (!targetPlaying && isActuallyPlaying) {
+        p.pauseVideo();
       }
     },
-    [room.data?.movie?.videoUrl]
+    [room.data?.movie?.videoUrl, localVideoUrl]
   );
 
   // Join via API + socket once we have room + user (or guest)
@@ -283,11 +299,11 @@ export function RoomView({ id }: { id: string }) {
       });
       sock.on("playback:request-sync", () => {
         // host: send current state to a late joiner
-        if (isHostRef.current && videoRef.current) {
+        if (isHostRef.current && playerRef.current) {
           sock!.emit("playback:sync", {
             roomId: id,
-            currentTime: videoRef.current.currentTime,
-            isPlaying: !videoRef.current.paused,
+            currentTime: playerRef.current.getCurrentTime(),
+            isPlaying: !playerRef.current.shouldPlay(),
           });
           // Also tell late joiner about local file if one is selected
           if (localFileNameRef.current) {
@@ -353,14 +369,14 @@ export function RoomView({ id }: { id: string }) {
   useEffect(() => {
     if (!isHost || !socket) return;
     const kind = videoKind(room.data?.movie?.videoUrl || null);
-    if (kind !== "direct") return;
+    if (kind !== "direct" && kind !== "youtube") return;
     const interval = setInterval(() => {
-      const v = videoRef.current;
-      if (v && socket) {
+      const p = playerRef.current;
+      if (p && socket) {
         socket.emit("playback:sync", {
           roomId: id,
-          currentTime: v.currentTime,
-          isPlaying: !v.paused,
+          currentTime: p.getCurrentTime(),
+          isPlaying: !p.shouldPlay(),
         });
       }
     }, 5000);
@@ -369,35 +385,59 @@ export function RoomView({ id }: { id: string }) {
 
   const emitSync = useCallback(() => {
     if (!socket || !isHostRef.current) return;
-    const v = videoRef.current;
-    if (!v) return;
+    const p = playerRef.current;
+    if (!p) return;
     socket.emit("playback:sync", {
       roomId: id,
-      currentTime: v.currentTime,
-      isPlaying: !v.paused,
+      currentTime: p.getCurrentTime(),
+      isPlaying: !p.shouldPlay(),
     });
     lastSyncEmit.current = Date.now();
   }, [socket, id]);
 
   const handlePlayPause = () => {
-    const v = videoRef.current;
-    if (!v || !isHost) return;
-    if (v.paused) v.play().catch(() => null);
-    else v.pause();
+    const p = playerRef.current;
+    if (!p || !isHost) return;
+    if (p.shouldPlay()) p.playVideo().catch(() => null);
+    else p.pauseVideo();
     setTimeout(emitSync, 100);
   };
 
   const handleSeek = (delta: number) => {
-    const v = videoRef.current;
-    if (!v || !isHost) return;
-    v.currentTime = Math.max(0, v.currentTime + delta);
+    const p = playerRef.current;
+    if (!p || !isHost) return;
+    p.seekVideo(Math.max(0, p.getCurrentTime() + delta));
     setTimeout(emitSync, 100);
   };
 
   const onVideoTimeUpdate = () => {
     if (isHost) {
-      const v = videoRef.current;
-      if (v) setPlayback((p) => ({ ...p, currentTime: v.currentTime, isPlaying: !v.paused }));
+      const p = playerRef.current;
+      if (p) setPlayback((pb) => ({ ...pb, currentTime: p.getCurrentTime(), isPlaying: !p.shouldPlay() }));
+    }
+  };
+
+  // Custom polling for YouTube to mock timeupdate events
+  useEffect(() => {
+    if (!isHost) return;
+    const kind = videoKind(room.data?.movie?.videoUrl || null);
+    if (kind !== "youtube") return;
+
+    const ytInterval = setInterval(() => {
+      onVideoTimeUpdate();
+    }, 1000);
+    return () => clearInterval(ytInterval);
+  }, [isHost, room.data?.movie?.videoUrl]);
+
+  const onYtReady = (e: any) => {
+    ytPlayerInstance.current = e.target;
+    playerRef.current = new YouTubePlayer(e.target, "main-youtube-player");
+  };
+
+  const onYtStateChange = (e: any) => {
+    if (isHost) {
+      emitSync();
+      onVideoTimeUpdate();
     }
   };
 
@@ -553,6 +593,7 @@ export function RoomView({ id }: { id: string }) {
                   </div>
                 )}
                 <video
+                  id="main-video-player"
                   ref={videoRef}
                   src={videoUrl!}
                   className={`w-full bg-black ${isAudio ? "h-32" : "aspect-video"}`}
@@ -579,11 +620,25 @@ export function RoomView({ id }: { id: string }) {
               </div>
             ) : kind === "youtube" && ytId ? (
               <div className="relative">
-                <iframe
-                  src={`https://www.youtube-nocookie.com/embed/${ytId}?controls=${isHost ? 1 : 0}&modestbranding=1`}
-                  className="aspect-video w-full"
-                  allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
+                <YouTube
+                  videoId={ytId}
+                  id="main-youtube-player"
+                  className="w-full aspect-video"
+                  iframeClassName="w-full h-full"
+                  opts={{
+                    width: '100%',
+                    height: '100%',
+                    playerVars: {
+                      autoplay: 0,
+                      controls: isHost ? 1 : 0,
+                      modestbranding: 1,
+                      rel: 0,
+                    },
+                  }}
+                  onReady={onYtReady}
+                  onStateChange={onYtStateChange}
+                  onPlay={emitSync}
+                  onPause={emitSync}
                 />
                 {!isHost && (
                   <div className="absolute top-2 start-2 bg-black/70 backdrop-blur px-2.5 py-1 rounded-full text-xs text-white">
