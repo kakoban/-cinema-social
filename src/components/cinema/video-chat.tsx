@@ -1,66 +1,50 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Socket } from "socket.io-client";
-import { Mic, MicOff, Video, VideoOff, Users } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useAuthStore } from "@/stores/auth-store";
+"use client";
 
-interface RoomMember {
-  userId: string;
-  username: string;
-  isHost: boolean;
-  avatar?: string | null;
-  isVideoChat?: boolean;
-  isMuted?: boolean;
-}
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { Socket } from "socket.io-client";
+import { Video, VideoOff, Mic, MicOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface VideoChatProps {
   socket: Socket | null;
-  members: RoomMember[];
-  hostId: string;
-  className?: string;
+  roomId: string;
+  userId: string;
+  members: any[];
 }
 
-const iceServers = () => {
-  return [{ urls: "stun:stun.l.google.com:19302" }];
-};
+export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
+  const [isVideoActive, setIsVideoActive] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  
+  const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const remoteVideosRef = useRef<Map<string, HTMLVideoElement>>(new Map());
+  
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
 
-export const VideoChat: React.FC<VideoChatProps> = ({ socket, members, hostId, className }) => {
-  const { user } = useAuthStore();
-  const selfId = user?.id;
-
-  const [inVideoChat, setInVideoChat] = useState(false);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(false);
-  const [isAudioEnabled, setIsAudioEnabled] = useState(false);
-
-  const ourStreamRef = useRef<MediaStream | null>(null);
-  const videoPCsRef = useRef<Record<string, RTCPeerConnection>>({});
-  const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
-
+  // Handle incoming signals
   useEffect(() => {
     if (!socket) return;
+    
+    const handleSignal = async (data: { from: string; msg: any }) => {
+      const { from, msg } = data;
+      let pc = peerConnectionsRef.current.get(from);
+      
+      if (!pc) {
+        pc = createPeerConnection(from);
+      }
 
-    const handleSignal = async (data: any) => {
-      const msg = data.msg;
-      const from = data.from;
-      let pc = videoPCsRef.current[from];
-      if (!pc) return;
-
-      if (msg.ice !== undefined) {
-        pc.addIceCandidate(new RTCIceCandidate(msg.ice)).catch(console.error);
-      } else if (msg.sdp && msg.sdp.type === "offer") {
-        if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-          pc.close();
-          delete videoPCsRef.current[from];
-          updateWebRTC();
-          pc = videoPCsRef.current[from];
-          if (!pc) return;
-        }
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+      if (msg.type === "offer") {
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        sendSignal(from, { sdp: pc.localDescription });
-      } else if (msg.sdp && msg.sdp.type === "answer") {
-        pc.setRemoteDescription(new RTCSessionDescription(msg.sdp)).catch(console.error);
+        socket.emit("signal", { to: from, msg: pc.localDescription });
+      } else if (msg.type === "answer") {
+        await pc.setRemoteDescription(new RTCSessionDescription(msg));
+      } else if (msg.candidate) {
+        await pc.addIceCandidate(new RTCIceCandidate(msg));
       }
     };
 
@@ -68,257 +52,172 @@ export const VideoChat: React.FC<VideoChatProps> = ({ socket, members, hostId, c
     return () => {
       socket.off("signal", handleSignal);
     };
+  }, [socket, userId]);
+
+  const createPeerConnection = useCallback((targetUserId: string) => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socket) {
+        socket.emit("signal", { to: targetUserId, msg: event.candidate });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      setRemoteStreams((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(targetUserId, event.streams[0]);
+        return newMap;
+      });
+    };
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, localStreamRef.current!);
+      });
+    }
+
+    peerConnectionsRef.current.set(targetUserId, pc);
+    return pc;
   }, [socket]);
 
+  // Connect to peers who have video chat active
   useEffect(() => {
-    updateWebRTC();
-  }, [members, inVideoChat]);
+    if (!isVideoActive || !socket) return;
 
-  useEffect(() => {
-    return () => {
-      stopWebRTC();
-    };
-  }, []);
-
-  const sendSignal = async (to: string, data: any) => {
-    if (!socket) return;
-    socket.emit("signal", { to, msg: data });
-  };
-
-  const emitUserMute = (isMuted: boolean) => {
-    if (!socket) return;
-    socket.emit("CMD:userMute", { isMuted });
-  };
-
-  const setupWebRTC = async () => {
-    if (!socket) return;
-
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: true,
-      });
-      setIsVideoEnabled(true);
-      setIsAudioEnabled(true);
-    } catch (e) {
-      console.warn("Failed to get video+audio, trying audio only", e);
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
-        setIsVideoEnabled(false);
-        setIsAudioEnabled(true);
-      } catch (e2) {
-        console.error("Failed to get any media devices", e2);
-        let canvas = document.createElement("canvas");
-        canvas.width = 640;
-        canvas.height = 480;
-        let ctx = canvas.getContext("2d");
-        if (ctx) ctx.fillRect(0, 0, 640, 480);
-        stream = canvas.captureStream();
-        let track = stream.getVideoTracks()[0];
-        if (track) track.enabled = false;
-      }
-    }
-
-    ourStreamRef.current = stream;
-    setInVideoChat(true);
-    socket.emit("CMD:joinVideo");
-    emitUserMute(!stream.getAudioTracks().some(t => t.enabled));
-
-    setTimeout(() => {
-      if (selfId && videoRefs.current[selfId] && ourStreamRef.current) {
-        videoRefs.current[selfId].srcObject = ourStreamRef.current;
-      }
-    }, 100);
-  };
-
-  const stopWebRTC = () => {
-    if (ourStreamRef.current) {
-      ourStreamRef.current.getTracks().forEach((track) => track.stop());
-      ourStreamRef.current = null;
-    }
-
-    Object.keys(videoPCsRef.current).forEach((key) => {
-      videoPCsRef.current[key].close();
-      delete videoPCsRef.current[key];
-    });
-
-    setInVideoChat(false);
-    setIsVideoEnabled(false);
-    setIsAudioEnabled(false);
-
-    if (socket) {
-      socket.emit("CMD:leaveVideo");
-    }
-  };
-
-  const toggleVideo = () => {
-    if (ourStreamRef.current) {
-      const videoTrack = ourStreamRef.current.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setIsVideoEnabled(videoTrack.enabled);
-      }
-    }
-  };
-
-  const toggleAudio = () => {
-    if (ourStreamRef.current) {
-      const audioTrack = ourStreamRef.current.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsAudioEnabled(audioTrack.enabled);
-        emitUserMute(!audioTrack.enabled);
-      }
-    }
-  };
-
-  const updateWebRTC = () => {
-    if (!ourStreamRef.current || !selfId) return;
-
-    const videoPCs = videoPCsRef.current;
-
-    const clientIds = new Set(
-      members.filter((p) => p.isVideoChat).map((p) => p.userId)
-    );
-
-    Object.keys(videoPCs).forEach((key) => {
-      if (!clientIds.has(key) && key !== selfId) {
-        videoPCs[key].close();
-        delete videoPCs[key];
-
-        if (videoRefs.current[key]) {
-          videoRefs.current[key].srcObject = null;
-        }
-      }
-    });
-
-    members.forEach((user) => {
-      const id = user.userId;
-
-      if (!user.isVideoChat) return;
-
-      if (id === selfId) {
-        if (!videoPCs[id]) {
-           videoPCs[id] = new RTCPeerConnection();
-        }
-        if (videoRefs.current[id] && videoRefs.current[id].srcObject !== ourStreamRef.current) {
-          videoRefs.current[id].srcObject = ourStreamRef.current;
-        }
-        return;
-      }
-
-      if (videoPCs[id]) return;
-
-      const pc = new RTCPeerConnection({ iceServers: iceServers() });
-      videoPCs[id] = pc;
-
-      ourStreamRef.current?.getTracks().forEach((track) => {
-        if (ourStreamRef.current) {
-          pc.addTrack(track, ourStreamRef.current);
-        }
-      });
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          sendSignal(id, { ice: event.candidate });
-        }
-      };
-
-      pc.ontrack = (event) => {
-        if (videoRefs.current[id]) {
-          videoRefs.current[id].srcObject = event.streams[0];
-        }
-      };
-
-      pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === "failed") {
-          pc.close();
-          delete videoPCsRef.current[id];
-          updateWebRTC();
-        }
-      };
-
-      const isOfferer = selfId < id;
-      if (isOfferer) {
-        pc.onnegotiationneeded = async () => {
+    members.forEach(async (member) => {
+      if (member.userId !== userId && member.isVideoChat && !peerConnectionsRef.current.has(member.userId)) {
+        // Deterministic role assignment based on userId string comparison
+        if (userId < member.userId) {
+          const pc = createPeerConnection(member.userId);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          sendSignal(id, { sdp: pc.localDescription });
-        };
+          socket.emit("signal", { to: member.userId, msg: pc.localDescription });
+        }
       }
     });
+    
+    // Cleanup disconnected peers
+    peerConnectionsRef.current.forEach((pc, id) => {
+      const isMemberVideoActive = members.find(m => m.userId === id)?.isVideoChat;
+      if (!isMemberVideoActive) {
+        pc.close();
+        peerConnectionsRef.current.delete(id);
+        setRemoteStreams(prev => {
+          const next = new Map(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    });
+
+  }, [members, isVideoActive, socket, userId, createPeerConnection]);
+
+  const toggleVideo = async () => {
+    if (isVideoActive) {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => track.stop());
+        localStreamRef.current = null;
+      }
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
+      }
+      setIsVideoActive(false);
+      socket?.emit("CMD:leaveVideo");
+      
+      // Close all peer connections
+      peerConnectionsRef.current.forEach((pc) => pc.close());
+      peerConnectionsRef.current.clear();
+      setRemoteStreams(new Map());
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localStreamRef.current = stream;
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+        setIsVideoActive(true);
+        setIsMuted(false);
+        socket?.emit("CMD:joinVideo");
+      } catch (err) {
+        console.error("Failed to access media devices", err);
+      }
+    }
   };
 
-  const videoChatMembers = members.filter(m => m.isVideoChat || (m.userId === selfId && inVideoChat));
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      const audioTracks = localStreamRef.current.getAudioTracks();
+      if (audioTracks.length > 0) {
+        const currentMute = !isMuted;
+        audioTracks[0].enabled = !currentMute;
+        setIsMuted(currentMute);
+        socket?.emit("CMD:userMute", { isMuted: currentMute });
+      }
+    }
+  };
 
-  if (!socket) return null;
+  // Bind stream to remote video elements
+  const setRemoteVideoRef = (id: string, el: HTMLVideoElement | null) => {
+    if (el) {
+      remoteVideosRef.current.set(id, el);
+      const stream = remoteStreams.get(id);
+      if (stream && el.srcObject !== stream) {
+        el.srcObject = stream;
+      }
+    }
+  };
+
+  if (!isVideoActive && members.filter(m => m.isVideoChat && m.userId !== userId).length === 0) {
+     return (
+        <Button variant="outline" size="sm" onClick={toggleVideo} className="gap-2">
+            <Video className="size-4" /> Start Video Chat
+        </Button>
+     );
+  }
 
   return (
-    <div className={`flex flex-col gap-4 ${className || ""}`}>
+    <div className="mt-4 flex flex-col gap-4">
       <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold flex items-center gap-2">
-          <Users className="w-5 h-5" /> Video Chat ({videoChatMembers.length})
-        </h3>
-        {!inVideoChat ? (
-          <Button onClick={setupWebRTC} size="sm" variant="outline" className="gap-2">
-            <Video className="w-4 h-4" /> Join Video
+        <h3 className="font-semibold text-sm">Video Chat</h3>
+        <div className="flex gap-2">
+          <Button variant={isMuted ? "destructive" : "secondary"} size="icon" onClick={toggleMute} disabled={!isVideoActive}>
+            {isMuted ? <MicOff className="size-4" /> : <Mic className="size-4" />}
           </Button>
-        ) : (
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={toggleAudio}
-              size="icon"
-              variant={isAudioEnabled ? "secondary" : "destructive"}
-              className="h-8 w-8 rounded-full"
-            >
-              {isAudioEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-            </Button>
-            <Button
-              onClick={toggleVideo}
-              size="icon"
-              variant={isVideoEnabled ? "secondary" : "destructive"}
-              className="h-8 w-8 rounded-full"
-            >
-              {isVideoEnabled ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
-            </Button>
-            <Button onClick={stopWebRTC} size="sm" variant="destructive" className="ml-2">
-              Leave
-            </Button>
+          <Button variant={isVideoActive ? "destructive" : "default"} size="icon" onClick={toggleVideo}>
+            {isVideoActive ? <VideoOff className="size-4" /> : <Video className="size-4" />}
+          </Button>
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+        {isVideoActive && (
+          <div className="relative aspect-video bg-black rounded overflow-hidden">
+             <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
+             <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-white">You</div>
           </div>
         )}
-      </div>
-
-      {videoChatMembers.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-          {videoChatMembers.map((member) => (
-            <div key={member.userId} className="relative aspect-video bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800 shadow-md">
-              <video
-                ref={(el) => {
-                  if (el) videoRefs.current[member.userId] = el;
-                }}
-                autoPlay
-                playsInline
-                muted={member.userId === selfId}
-                className={`w-full h-full object-cover ${member.userId === selfId ? "scale-x-[-1]" : ""}`}
-              />
-
-              <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent flex justify-between items-center">
-                <span className="text-xs font-medium text-white truncate max-w-[80%] drop-shadow-md">
-                  {member.username} {member.userId === selfId ? "(You)" : ""}
-                </span>
-
-                {member.userId !== selfId && member.isMuted && (
-                  <MicOff className="w-3 h-3 text-red-500 drop-shadow-md" />
-                )}
-              </div>
+        
+        {Array.from(remoteStreams.entries()).map(([id, stream]) => {
+          const member = members.find(m => m.userId === id);
+          return (
+            <div key={id} className="relative aspect-video bg-black rounded overflow-hidden">
+               <video 
+                 ref={(el) => setRemoteVideoRef(id, el)} 
+                 autoPlay 
+                 playsInline 
+                 className="w-full h-full object-cover" 
+               />
+               <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-white">
+                 {member?.username || id}
+                 {member?.isMuted && <MicOff className="size-3 inline ml-1 text-red-500" />}
+               </div>
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </div>
   );
-};
+}
