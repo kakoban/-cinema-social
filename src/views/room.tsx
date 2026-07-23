@@ -32,6 +32,9 @@ import { useNavigate } from "@/stores/router";
 import { useAuthStore } from "@/stores/auth-store";
 import { useI18n } from "@/i18n";
 import { UserAvatar } from "@/components/cinema/user-avatar";
+import YouTube from "react-youtube";
+import { Player, HTMLPlayer, YouTubePlayer } from "@/components/cinema/player";
+import { VideoChat } from "@/components/cinema/video-chat";
 
 interface RoomMember {
   userId: string;
