@@ -24,6 +24,35 @@ export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
   
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
 
+  const createPeerConnection = useCallback((targetUserId: string) => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socket) {
+        socket.emit("signal", { to: targetUserId, msg: event.candidate });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      setRemoteStreams((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(targetUserId, event.streams[0]);
+        return newMap;
+      });
+    };
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, localStreamRef.current!);
+      });
+    }
+
+    peerConnectionsRef.current.set(targetUserId, pc);
+    return pc;
+  }, [socket]);
+
   // Handle incoming signals
   useEffect(() => {
     if (!socket) return;
@@ -53,35 +82,6 @@ export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
       socket.off("signal", handleSignal);
     };
   }, [socket, userId]);
-
-  const createPeerConnection = useCallback((targetUserId: string) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    });
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate && socket) {
-        socket.emit("signal", { to: targetUserId, msg: event.candidate });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      setRemoteStreams((prev) => {
-        const newMap = new Map(prev);
-        newMap.set(targetUserId, event.streams[0]);
-        return newMap;
-      });
-    };
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        pc.addTrack(track, localStreamRef.current!);
-      });
-    }
-
-    peerConnectionsRef.current.set(targetUserId, pc);
-    return pc;
-  }, [socket]);
 
   // Connect to peers who have video chat active
   useEffect(() => {

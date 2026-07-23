@@ -733,6 +733,15 @@ export function RoomView({ id }: { id: string }) {
           </Card>
 
           {/* Movie info */}
+          <div className="w-full">
+            <VideoChat
+              socket={socket}
+              roomId={id}
+              userId={user?.id || 'guest'}
+              members={members}
+            />
+          </div>
+
           {r.movie && (
             <Card className="p-4">
               <h3 className="font-semibold mb-1">{r.movie.title}</h3>

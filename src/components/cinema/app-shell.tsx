@@ -99,6 +99,9 @@ export function AppShell() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
     const cleanup = init();
     return cleanup;
   }, [init]);
