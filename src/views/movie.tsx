@@ -296,9 +296,20 @@ export function MovieView({ id }: { id: string }) {
                       <Play className="size-4 me-2" /> {t("movie.watchNow")}
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-4xl p-0 overflow-hidden">
-                    <div className="aspect-video">
-                      <iframe src={watchEmbed} className="size-full" allowFullScreen allow="autoplay; fullscreen" />
+                  <DialogContent className="max-w-5xl p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-2xl sm:rounded-2xl">
+                    <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/80 border-b border-white/10 backdrop-blur-md">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-white/90 uppercase tracking-wider">Free Watch</span>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-white/40">Archive.org Provider</p>
+                      </div>
+                    </div>
+                    <div className="aspect-video w-full bg-black relative">
+                      <div className="absolute inset-0 flex items-center justify-center -z-10">
+                        <Loader2 className="size-8 animate-spin text-red-600/50" />
+                      </div>
+                      <iframe src={watchEmbed} className="size-full absolute inset-0" allowFullScreen allow="autoplay; fullscreen" />
                     </div>
                   </DialogContent>
                 </Dialog>

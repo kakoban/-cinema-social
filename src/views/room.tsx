@@ -19,6 +19,7 @@ import {
   Music,
   SmilePlus,
   Subtitles,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -28,6 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
@@ -119,6 +121,9 @@ export function RoomView({ id }: { id: string }) {
   const [expectedFileName, setExpectedFileName] = useState<string | null>(null);
   const [expectedFingerprint, setExpectedFingerprint] = useState<string | null>(null);
   const [fingerprintMismatch, setFingerprintMismatch] = useState(false);
+  const [subtitleSearchOpen, setSubtitleSearchOpen] = useState(false);
+  const [subtitlesSearching, setSubtitlesSearching] = useState(false);
+  const [subtitleResults, setSubtitleResults] = useState<any[]>([]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<Player | null>(null);
@@ -193,6 +198,40 @@ export function RoomView({ id }: { id: string }) {
 
     if (subtitleUrl) URL.revokeObjectURL(subtitleUrl);
     setSubtitleUrl(finalUrl);
+  };
+
+  const searchSubtitles = async () => {
+    if (!room.data?.movie) return;
+    setSubtitlesSearching(true);
+    try {
+      const q = room.data.movie.title;
+      const res = await api.get<{ data: any[] }>(`/api/subtitles?action=search&q=${encodeURIComponent(q)}`);
+      setSubtitleResults(res.data || []);
+    } catch (err) {
+      toast.error("Failed to search subtitles");
+    } finally {
+      setSubtitlesSearching(false);
+    }
+  };
+
+  const downloadAndSetSubtitle = async (fileId: string) => {
+    try {
+      // Instead of relying on a JSON response { url }, our API returns the raw VTT file directly.
+      // So we use standard fetch to get the text, then create a Blob URL for it.
+      const res = await fetch(`/api/subtitles?action=download&fileId=${fileId}`);
+      if (!res.ok) throw new Error("Failed");
+      const vttText = await res.text();
+
+      const blob = new Blob([vttText], { type: "text/vtt" });
+      const finalUrl = URL.createObjectURL(blob);
+
+      if (subtitleUrl) URL.revokeObjectURL(subtitleUrl);
+      setSubtitleUrl(finalUrl);
+      setSubtitleSearchOpen(false);
+      toast.success("Subtitle loaded");
+    } catch (err) {
+      toast.error("Failed to load subtitle");
+    }
   };
 
   const driftFixing = useRef(false);
@@ -820,18 +859,57 @@ export function RoomView({ id }: { id: string }) {
                 className="hidden"
               />
             </label>
-            <label className="flex items-center justify-center gap-2 cursor-pointer border border-dashed border-border rounded-lg p-3 hover:border-primary/50 hover:bg-primary/5 transition">
-              <Subtitles className="size-4 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">
-                {subtitleUrl ? "Subtitle loaded" : "Add Subtitle (.srt, .vtt)"}
-              </span>
-              <input
-                type="file"
-                accept=".srt,.vtt"
-                onChange={handleSubtitleChange}
-                className="hidden"
-              />
-            </label>
+            <div className="flex gap-2">
+              <label className="flex-1 flex items-center justify-center gap-2 cursor-pointer border border-dashed border-border rounded-lg p-3 hover:border-primary/50 hover:bg-primary/5 transition">
+                <Subtitles className="size-4 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">
+                  {subtitleUrl ? "Subtitle loaded" : "Add Local Subtitle (.srt, .vtt)"}
+                </span>
+                <input
+                  type="file"
+                  accept=".srt,.vtt"
+                  onChange={handleSubtitleChange}
+                  className="hidden"
+                />
+              </label>
+              <Dialog open={subtitleSearchOpen} onOpenChange={setSubtitleSearchOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="h-auto p-3" onClick={searchSubtitles}>
+                    <Search className="size-4" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Search OpenSubtitles</DialogTitle>
+                  </DialogHeader>
+                  <div className="max-h-[300px] overflow-y-auto space-y-2 mt-4">
+                    {subtitlesSearching ? (
+                      <div className="flex justify-center p-4">
+                        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : subtitleResults.length === 0 ? (
+                      <p className="text-center text-sm text-muted-foreground">No subtitles found</p>
+                    ) : (
+                      subtitleResults.map((sub, i) => (
+                        <button
+                          key={i}
+                          onClick={() => downloadAndSetSubtitle(sub.fileId)}
+                          className="w-full text-left p-3 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition flex items-center justify-between"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate" title={sub.fileName}>{sub.fileName}</p>
+                            <p className="text-xs text-muted-foreground mt-1">Language: {sub.language}</p>
+                          </div>
+                          <Badge variant="secondary" className="ml-2 shrink-0">
+                            Select
+                          </Badge>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
             {localFileName && !fingerprintMismatch && (
               <p className="text-xs text-green-500 mt-2 flex items-center gap-1">
                 <span className="flex h-2 w-2 rounded-full bg-green-500 animate-pulse" />

@@ -73,6 +73,12 @@ export class HTMLPlayer implements Player {
     return Boolean(el?.paused || el?.ended);
   };
 
+  isPlaying = () => {
+    const el = this.getVideoEl();
+    if (!el) return false;
+    return Boolean(!el.paused && !el.ended);
+  };
+
   setMute = (muted: boolean) => {
     const el = this.getVideoEl();
     if (el) {

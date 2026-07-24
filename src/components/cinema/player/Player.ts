@@ -9,6 +9,7 @@ export abstract class Player {
   public abstract pauseVideo: () => void;
   public abstract seekVideo: (time: number) => void;
   public abstract shouldPlay: () => boolean;
+  public abstract isPlaying: () => boolean;
   public abstract setMute: (muted: boolean) => void;
   public abstract getVolume: () => number;
   public abstract setVolume: (volume: number) => void;

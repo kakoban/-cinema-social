@@ -68,6 +68,11 @@ export class YouTubePlayer implements Player {
     );
   };
 
+  isPlaying = () => {
+    if (!this.watchPartyYTPlayer) return false;
+    return this.watchPartyYTPlayer.getPlayerState() === window.YT?.PlayerState.PLAYING;
+  };
+
   setMute = (muted: boolean) => {
     if (muted) {
       this.watchPartyYTPlayer?.mute();
