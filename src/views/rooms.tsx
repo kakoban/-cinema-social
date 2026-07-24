@@ -51,6 +51,45 @@ export function RoomsView() {
   const [description, setDescription] = useState("");
   const [isPublic, setIsPublic] = useState(true);
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [selectedMovie, setSelectedMovie] = useState<{ id: string; title: string } | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+
+  const handleSearch = async (q: string) => {
+    setSearchQuery(q);
+    if (!q.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const res = await api.get<{ data: { results: any[] } }>(`/api/movies/search?q=${encodeURIComponent(q)}`);
+      setSearchResults(res.data?.results || []);
+    } catch {
+      /* ignore */
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectMovie = async (m: any) => {
+    try {
+      let targetId = m.id;
+      if (!targetId && m.tmdbId) {
+        const mRes = await api.get<{ data: any }>(`/api/movies/${m.tmdbId}`);
+        targetId = mRes.data?.id;
+      }
+      if (targetId) {
+        setSelectedMovie({ id: targetId, title: m.title });
+        setSearchQuery("");
+        setSearchResults([]);
+      }
+    } catch {
+      toast.error("Failed to select movie");
+    }
+  };
+
   const rooms = useQuery<Room[]>({
     queryKey: ["rooms"],
     queryFn: () => api.get<Room[]>("/api/rooms").then((r) => r.data!),
@@ -63,6 +102,7 @@ export function RoomsView() {
         .post<{ id: string }>("/api/rooms", {
           name: name.trim(),
           description: description.trim() || undefined,
+          movieId: selectedMovie?.id || undefined,
           isPublic,
         })
         .then((r) => r.data!),
@@ -71,6 +111,7 @@ export function RoomsView() {
       setOpen(false);
       setName("");
       setDescription("");
+      setSelectedMovie(null);
       setIsPublic(true);
       qc.invalidateQueries({ queryKey: ["rooms"] });
       navigate(`/room/${data.id}`);
@@ -116,6 +157,39 @@ export function RoomsView() {
                     placeholder={t("rooms.roomDesc")}
                     className="min-h-20"
                   />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Movie (Optional)</Label>
+                  {selectedMovie ? (
+                    <div className="flex items-center justify-between p-2 rounded-md bg-muted text-xs">
+                      <span className="font-medium truncate">Selected: {selectedMovie.title}</span>
+                      <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setSelectedMovie(null)}>Remove</Button>
+                    </div>
+                  ) : (
+                    <>
+                      <Input
+                        placeholder="Search movie to add..."
+                        value={searchQuery}
+                        onChange={(e) => handleSearch(e.target.value)}
+                      />
+                      {isSearching ? (
+                        <p className="text-xs text-muted-foreground">Searching...</p>
+                      ) : searchResults.length > 0 ? (
+                        <div className="max-h-36 overflow-y-auto border rounded-md p-1 space-y-1">
+                          {searchResults.map((m, idx) => (
+                            <div
+                              key={idx}
+                              onClick={() => handleSelectMovie(m)}
+                              className="p-1.5 hover:bg-accent rounded cursor-pointer text-xs flex justify-between"
+                            >
+                              <span className="truncate">{m.title}</span>
+                              <span className="text-muted-foreground">{m.source || "TMDB"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border p-3">
                   <div className="flex items-center gap-2">

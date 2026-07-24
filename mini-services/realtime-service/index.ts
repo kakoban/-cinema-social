@@ -320,6 +320,17 @@ io.on("connection", (socket: Socket) => {
     });
   });
 
+  socket.on("room:change-movie", (data: { roomId: string; movie: any }) => {
+    const room = rooms.get(data.roomId);
+    if (room) {
+      room.playback.currentTime = 0;
+      room.playback.isPlaying = false;
+      room.playback.lastUpdate = Date.now();
+    }
+    io.to(data.roomId).emit("room:movie-changed", { roomId: data.roomId, movie: data.movie });
+    systemMessage(data.roomId, `Movie changed to "${data.movie?.title || "New Movie"}"`);
+  });
+
   const handleDisconnect = () => {
     for (const roomId of socketRooms) {
       const room = rooms.get(roomId);

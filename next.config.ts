@@ -9,7 +9,8 @@ const withPWA = withPWAInit({
 });
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // For Vercel deployment, remove standalone output
+  // output: "standalone",
   turbopack: {},
   typescript: {
     ignoreBuildErrors: true,

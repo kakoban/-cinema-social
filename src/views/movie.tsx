@@ -112,6 +112,7 @@ export function MovieView({ id }: { id: string }) {
   });
 
   const [showTrailer, setShowTrailer] = useState(false);
+  const [activeServerIdx, setActiveServerIdx] = useState(0);
   const [reviewContent, setReviewContent] = useState("");
   const [reviewRating, setReviewRating] = useState(7);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -224,9 +225,17 @@ export function MovieView({ id }: { id: string }) {
   let watchEmbed: string | null = null;
   let streamEmbed: string | null = null;
 
+  const tmdbServers = m.tmdbId ? [
+    { name: "Server 1 (Smashy)", url: `https://player.smashy.stream/movie/${m.tmdbId}` },
+    { name: "Server 2 (AutoEmbed)", url: `https://autoembed.co/movie/tmdb/${m.tmdbId}` },
+    { name: "Server 3 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${m.tmdbId}` },
+    { name: "Server 4 (VidSrc.xyz)", url: `https://vidsrc.xyz/embed/movie/${m.tmdbId}` },
+    { name: "Server 5 (VidLink)", url: `https://vidlink.pro/movie/${m.tmdbId}` },
+    { name: "Server 6 (2Embed)", url: `https://www.2embed.cc/embed/${m.tmdbId}` },
+  ] : [];
+
   if (m.tmdbId) {
-    // switch to autoembed as a reliable fallback, bypassing most common adblock/dns issues
-    streamEmbed = `https://autoembed.co/movie/tmdb/${m.tmdbId}`;
+    streamEmbed = tmdbServers[activeServerIdx]?.url || `https://player.smashy.stream/movie/${m.tmdbId}`;
   }
 
   if (m.videoUrl) {
@@ -323,7 +332,7 @@ export function MovieView({ id }: { id: string }) {
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="max-w-5xl p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-2xl sm:rounded-2xl">
-                    <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/80 border-b border-white/10 backdrop-blur-md">
+                    <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/80 border-b border-white/10 backdrop-blur-md flex-wrap gap-2">
                       <div className="flex items-center gap-2">
                         <span className="relative flex h-2 w-2">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -331,21 +340,31 @@ export function MovieView({ id }: { id: string }) {
                         </span>
                         <span className="font-semibold text-sm text-white/90 uppercase tracking-wider">Free Stream</span>
                       </div>
-                      <div className="text-right">
-                        <p className="text-[10px] text-white/40">External Provider</p>
+                      <div className="flex items-center gap-1.5 overflow-x-auto">
+                        {tmdbServers.map((srv, idx) => (
+                          <Button
+                            key={idx}
+                            size="sm"
+                            variant={activeServerIdx === idx ? "default" : "outline"}
+                            className={`h-7 text-xs px-2.5 ${activeServerIdx === idx ? "bg-red-600 hover:bg-red-700 text-white" : "bg-black/40 text-white/80 border-white/20 hover:bg-white/10"}`}
+                            onClick={() => setActiveServerIdx(idx)}
+                          >
+                            {srv.name}
+                          </Button>
+                        ))}
                       </div>
                     </div>
                     <div className="aspect-video w-full bg-black relative">
                       <div className="absolute inset-0 flex items-center justify-center -z-10">
                         <Loader2 className="size-8 animate-spin text-red-600/50" />
                       </div>
-                      <iframe src={streamEmbed} className="size-full absolute inset-0" allowFullScreen allow="autoplay; fullscreen" />
+                      <iframe key={streamEmbed} src={streamEmbed} className="size-full absolute inset-0" allowFullScreen allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerPolicy="no-referrer" />
                     </div>
                     <div className="bg-zinc-900 px-4 py-2 flex items-start gap-3">
                        <span className="text-xl">💡</span>
                        <div>
-                         <p className="text-xs text-white/80 font-medium">Player not loading?</p>
-                         <p className="text-[11px] text-white/50 mt-0.5">Change the server from the settings gear icon inside the player, or try pausing AdBlockers.</p>
+                         <p className="text-xs text-white/80 font-medium">Server error or not loading?</p>
+                         <p className="text-[11px] text-white/50 mt-0.5">Click any server button above (Server 1 to 5) to switch mirrors instantly.</p>
                        </div>
                     </div>
                   </DialogContent>

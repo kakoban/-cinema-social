@@ -79,14 +79,15 @@ interface RoomDetail {
   memberCount: number;
 }
 
-function videoKind(url: string | null): "direct" | "youtube" | "archive" | "vimeo" | "none" {
+function videoKind(url: string | null): "direct" | "youtube" | "archive" | "vimeo" | "embed" | "none" {
   if (!url) return "none";
   const u = url.toLowerCase();
-  if (u.includes("archive.org/download/") || /\.(mp4|ogv|webm|m4v|mpeg|mpg|mp3|wav|ogg|m4a|aac)(\?|$)/.test(u)) return "direct";
   if (u.includes("youtube.com/watch") || u.includes("youtube.com/embed") || u.includes("youtu.be")) return "youtube";
-  if (u.includes("archive.org/embed")) return "archive";
   if (u.includes("vimeo.com")) return "vimeo";
-  return "direct";
+  if (u.includes("archive.org/download/") || /\.(mp4|ogv|webm|m4v|mpeg|mpg|mp3|wav|ogg|m4a|aac)(\?|$)/.test(u)) return "direct";
+  if (u.includes("archive.org/embed")) return "archive";
+  if (u.includes("autoembed.co") || u.includes("/embed/")) return "embed";
+  return "embed";
 }
 
 function youtubeId(url: string): string | null {
@@ -124,6 +125,79 @@ export function RoomView({ id }: { id: string }) {
   const [subtitleSearchOpen, setSubtitleSearchOpen] = useState(false);
   const [subtitlesSearching, setSubtitlesSearching] = useState(false);
   const [subtitleResults, setSubtitleResults] = useState<any[]>([]);
+  const [subtitleSource, setSubtitleSource] = useState<'opensubtitles' | 'subscene'>('subscene');
+  const [subtitleQuery, setSubtitleQuery] = useState('');
+
+  const [changeMovieOpen, setChangeMovieOpen] = useState(false);
+  const [movieSearchQuery, setMovieSearchQuery] = useState("");
+  const [movieSearchResults, setMovieSearchResults] = useState<any[]>([]);
+  const [isSearchingMovies, setIsSearchingMovies] = useState(false);
+  const [customMovieUrl, setCustomMovieUrl] = useState("");
+  const [customMovieTitle, setCustomMovieTitle] = useState("");
+  const [activeRoomServerIdx, setActiveRoomServerIdx] = useState(0);
+
+  const handleSearchMovies = async (q: string) => {
+    setMovieSearchQuery(q);
+    if (!q.trim()) {
+      setMovieSearchResults([]);
+      return;
+    }
+    setIsSearchingMovies(true);
+    try {
+      const res = await api.get<{ data: { results: any[] } }>(`/api/movies/search?q=${encodeURIComponent(q)}`);
+      setMovieSearchResults(res.data?.results || []);
+    } catch {
+      toast.error("Failed to search movies");
+    } finally {
+      setIsSearchingMovies(false);
+    }
+  };
+
+  const handleSelectMovie = async (mId: string) => {
+    try {
+      const res = await api.put<{ data: RoomDetail }>(`/api/rooms/${id}`, { movieId: mId });
+      setChangeMovieOpen(false);
+      qc.invalidateQueries({ queryKey: ["room", id] });
+      toast.success("Movie changed successfully!");
+      if (socket) {
+        socket.emit("room:change-movie", { roomId: id, movie: res.data?.movie });
+      }
+    } catch {
+      toast.error("Failed to change movie");
+    }
+  };
+
+  const handleSelectSearchResult = async (item: any) => {
+    try {
+      let targetId = item.id;
+      if (!targetId && item.tmdbId) {
+        const mRes = await api.get<{ data: any }>(`/api/movies/${item.tmdbId}`);
+        targetId = mRes.data?.id;
+      }
+      if (targetId) {
+        await handleSelectMovie(targetId);
+      }
+    } catch {
+      toast.error("Failed to import movie");
+    }
+  };
+
+  const handleAddCustomUrlMovie = async () => {
+    if (!customMovieUrl.trim()) return;
+    try {
+      const created = await api.post<{ data: { id: string } }>("/api/movies/custom", {
+        title: customMovieTitle.trim() || "Custom Movie Stream",
+        videoUrl: customMovieUrl.trim(),
+      });
+      if (created.data?.id) {
+        await handleSelectMovie(created.data.id);
+        setCustomMovieUrl("");
+        setCustomMovieTitle("");
+      }
+    } catch {
+      toast.error("Failed to add custom movie URL");
+    }
+  };
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<Player | null>(null);
@@ -204,8 +278,17 @@ export function RoomView({ id }: { id: string }) {
     if (!room.data?.movie) return;
     setSubtitlesSearching(true);
     try {
-      const q = room.data.movie.title;
-      const res = await api.get<{ data: any[] }>(`/api/subtitles?action=search&q=${encodeURIComponent(q)}`);
+      const q = subtitleQuery || room.data.movie.title;
+      setSubtitleQuery(q);
+      
+      let endpoint = '';
+      if (subtitleSource === 'subscene') {
+        endpoint = `/api/subtitles/subscene?action=search&q=${encodeURIComponent(q)}&languages=fa,en`;
+      } else {
+        endpoint = `/api/subtitles?action=search&q=${encodeURIComponent(q)}`;
+      }
+      
+      const res = await api.get<{ data: any[] }>(endpoint);
       setSubtitleResults(res.data || []);
     } catch (err) {
       toast.error("Failed to search subtitles");
@@ -216,11 +299,33 @@ export function RoomView({ id }: { id: string }) {
 
   const downloadAndSetSubtitle = async (fileId: string) => {
     try {
-      // Instead of relying on a JSON response { url }, our API returns the raw VTT file directly.
-      // So we use standard fetch to get the text, then create a Blob URL for it.
-      const res = await fetch(`/api/subtitles?action=download&fileId=${fileId}`);
-      if (!res.ok) throw new Error("Failed");
-      const vttText = await res.text();
+      let vttText = '';
+      
+      if (subtitleSource === 'subscene') {
+        // For Subscene, fileId is actually the subtitle path
+        const res = await fetch(`/api/subtitles/subscene?action=download&path=${encodeURIComponent(fileId)}`);
+        if (!res.ok) throw new Error("Failed");
+        
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('json')) {
+          // If response is JSON, it means we got a download URL
+          const data = await res.json();
+          if (data.downloadUrl) {
+            // Open the download URL in a new tab
+            window.open(data.downloadUrl, '_blank');
+            toast.info("Please download the subtitle file and load it manually");
+            return;
+          }
+          throw new Error("No download URL");
+        }
+        
+        vttText = await res.text();
+      } else {
+        // For OpenSubtitles
+        const res = await fetch(`/api/subtitles?action=download&fileId=${fileId}`);
+        if (!res.ok) throw new Error("Failed");
+        vttText = await res.text();
+      }
 
       const blob = new Blob([vttText], { type: "text/vtt" });
       const finalUrl = URL.createObjectURL(blob);
@@ -391,6 +496,9 @@ export function RoomView({ id }: { id: string }) {
             });
           }
         }
+      });
+      sock.on("room:movie-changed", () => {
+        qc.invalidateQueries({ queryKey: ["room", id] });
       });
       sock.on("room:full", () => {
         toast.error(t("rooms.roomFull"));
@@ -614,13 +722,26 @@ export function RoomView({ id }: { id: string }) {
   }
 
   const r = room.data;
-  // Use local file if available, otherwise use the room movie URL
-  const videoUrl = localVideoUrl || r.movie?.videoUrl;
-  const kind = localVideoUrl ? "direct" as const : videoKind(r.movie?.videoUrl || null);
+
+  const roomTmdbServers = r?.movie?.tmdbId ? [
+    { name: "Server 1 (Smashy)", url: `https://player.smashy.stream/movie/${r.movie.tmdbId}` },
+    { name: "Server 2 (VidSrc.me)", url: `https://vidsrc.me/embed/movie?tmdb=${r.movie.tmdbId}` },
+    { name: "Server 3 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${r.movie.tmdbId}` },
+    { name: "Server 4 (VidSrc.xyz)", url: `https://vidsrc.xyz/embed/movie/${r.movie.tmdbId}` },
+    { name: "Server 5 (VidLink)", url: `https://vidlink.pro/movie/${r.movie.tmdbId}` },
+    { name: "Server 6 (2Embed)", url: `https://www.2embed.cc/embed/${r.movie.tmdbId}` },
+  ] : [];
+
+  // Use local file if available, otherwise use active mirror or room movie URL
+  const rawMovieUrl = r.movie?.tmdbId && roomTmdbServers[activeRoomServerIdx]
+    ? roomTmdbServers[activeRoomServerIdx].url
+    : (r.movie?.videoUrl || (r.movie?.tmdbId ? `https://player.smashy.stream/movie/${r.movie.tmdbId}` : null));
+  const videoUrl = localVideoUrl || rawMovieUrl;
+  const kind = localVideoUrl ? ("direct" as const) : videoKind(rawMovieUrl);
   const ytId = kind === "youtube" && videoUrl ? youtubeId(videoUrl) : null;
   const isAudio = localFileName
     ? /\.(mp3|wav|ogg|m4a|aac)$/i.test(localFileName)
-    : (r.movie?.videoUrl ? /\.(mp3|wav|ogg|m4a|aac)(\?|$)/i.test(r.movie.videoUrl) : false);
+    : (rawMovieUrl ? /\.(mp3|wav|ogg|m4a|aac)(\?|$)/i.test(rawMovieUrl) : false);
 
   const typingList = Object.values(typingUsers).filter((tp) => tp.username !== user?.username);
 
@@ -651,6 +772,71 @@ export function RoomView({ id }: { id: string }) {
           </div>
         </div>
         <div className="flex gap-2">
+          {isHost && (
+            <Dialog open={changeMovieOpen} onOpenChange={setChangeMovieOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Film className="size-4 me-1" /> Change Movie
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>Select Movie for Watch Party</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground">Search Movie (Database / TMDB / Archive)</label>
+                    <Input
+                      placeholder="Search title..."
+                      value={movieSearchQuery}
+                      onChange={(e) => handleSearchMovies(e.target.value)}
+                    />
+                  </div>
+                  {isSearchingMovies ? (
+                    <div className="flex justify-center p-4">
+                      <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : movieSearchResults.length > 0 ? (
+                    <ScrollArea className="max-h-56 border rounded-md p-2 space-y-1">
+                      {movieSearchResults.map((m, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => handleSelectSearchResult(m)}
+                          className="flex items-center justify-between p-2 hover:bg-muted/80 rounded cursor-pointer transition text-sm"
+                        >
+                          <span className="font-medium truncate">{m.title} {m.year ? `(${m.year})` : ""}</span>
+                          <Badge variant="secondary" className="text-xs">{m.source || "TMDB"}</Badge>
+                        </div>
+                      ))}
+                    </ScrollArea>
+                  ) : movieSearchQuery ? (
+                    <p className="text-xs text-muted-foreground text-center">No movies found</p>
+                  ) : null}
+
+                  <Separator />
+
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground block">Or enter custom stream / video URL</label>
+                    <Input
+                      placeholder="Title (optional)"
+                      value={customMovieTitle}
+                      onChange={(e) => setCustomMovieTitle(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="https://example.com/video.mp4 or embed URL"
+                        value={customMovieUrl}
+                        onChange={(e) => setCustomMovieUrl(e.target.value)}
+                      />
+                      <Button onClick={handleAddCustomUrlMovie} disabled={!customMovieUrl.trim()}>
+                        Set URL
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
           <Button variant="outline" size="sm" onClick={() => leaveRoom.mutate()} disabled={leaveRoom.isPending}>
             <LogOut className="size-4 me-1" /> {t("rooms.leave")}
           </Button>
@@ -695,6 +881,11 @@ export function RoomView({ id }: { id: string }) {
                 <Video className="size-12 text-muted-foreground mb-3" />
                 <p className="text-muted-foreground">{t("rooms.noMovie")}</p>
                 <p className="text-xs text-muted-foreground mt-1 max-w-sm">{t("rooms.pickMovie")}</p>
+                {isHost && (
+                  <Button className="mt-4 bg-red-600 hover:bg-red-700" onClick={() => setChangeMovieOpen(true)}>
+                    <Film className="size-4 me-2" /> Select Movie
+                  </Button>
+                )}
               </div>
             ) : kind === "direct" ? (
               <div className="relative overflow-hidden">
@@ -799,11 +990,31 @@ export function RoomView({ id }: { id: string }) {
               </div>
             ) : (
               <div className="relative">
+                {roomTmdbServers.length > 0 && (
+                  <div className="bg-zinc-950 px-3 py-1.5 border-b border-white/10 flex items-center justify-between gap-2 overflow-x-auto">
+                    <span className="text-xs text-white/70 font-medium shrink-0">Mirror Server:</span>
+                    <div className="flex items-center gap-1">
+                      {roomTmdbServers.map((srv, idx) => (
+                        <Button
+                          key={idx}
+                          size="sm"
+                          variant={activeRoomServerIdx === idx ? "default" : "outline"}
+                          className={`h-6 text-[11px] px-2 ${activeRoomServerIdx === idx ? "bg-red-600 hover:bg-red-700 text-white" : "bg-black/40 text-white/80 border-white/20 hover:bg-white/10"}`}
+                          onClick={() => setActiveRoomServerIdx(idx)}
+                        >
+                          {srv.name}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <iframe
+                  key={videoUrl}
                   src={videoUrl!}
                   className="aspect-video w-full"
                   allowFullScreen
-                  allow="autoplay; fullscreen"
+                  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                  referrerPolicy="no-referrer"
                 />
                 {!isHost && (
                   <div className="absolute top-2 start-2 bg-black/70 backdrop-blur px-2.5 py-1 rounded-full text-xs text-white">
@@ -878,27 +1089,80 @@ export function RoomView({ id }: { id: string }) {
                     <Search className="size-4" />
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className="max-w-md">
                   <DialogHeader>
-                    <DialogTitle>Search OpenSubtitles</DialogTitle>
+                    <DialogTitle>Search Subtitles</DialogTitle>
                   </DialogHeader>
-                  <div className="max-h-[300px] overflow-y-auto space-y-2 mt-4">
+                  
+                  {/* Source Tabs */}
+                  <div className="flex gap-2 mb-4">
+                    <Button
+                      variant={subtitleSource === 'subscene' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => {
+                        setSubtitleSource('subscene');
+                        setSubtitleResults([]);
+                      }}
+                    >
+                      Subscene (رایگان)
+                    </Button>
+                    <Button
+                      variant={subtitleSource === 'opensubtitles' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => {
+                        setSubtitleSource('opensubtitles');
+                        setSubtitleResults([]);
+                      }}
+                    >
+                      OpenSubtitles
+                    </Button>
+                  </div>
+
+                  {/* Search Input */}
+                  <div className="flex gap-2 mb-4">
+                    <Input
+                      placeholder="Search subtitles..."
+                      value={subtitleQuery}
+                      onChange={(e) => setSubtitleQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && searchSubtitles()}
+                    />
+                    <Button onClick={searchSubtitles} disabled={subtitlesSearching}>
+                      {subtitlesSearching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+                    </Button>
+                  </div>
+
+                  {/* Results */}
+                  <div className="max-h-[300px] overflow-y-auto space-y-2">
                     {subtitlesSearching ? (
                       <div className="flex justify-center p-4">
                         <Loader2 className="size-6 animate-spin text-muted-foreground" />
                       </div>
                     ) : subtitleResults.length === 0 ? (
-                      <p className="text-center text-sm text-muted-foreground">No subtitles found</p>
+                      <p className="text-center text-sm text-muted-foreground">
+                        {subtitleQuery ? 'No subtitles found' : 'Enter a search query'}
+                      </p>
                     ) : (
                       subtitleResults.map((sub, i) => (
                         <button
                           key={i}
-                          onClick={() => downloadAndSetSubtitle(sub.fileId)}
+                          onClick={() => downloadAndSetSubtitle(sub.fileId || sub.id)}
                           className="w-full text-left p-3 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition flex items-center justify-between"
                         >
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium truncate" title={sub.fileName}>{sub.fileName}</p>
-                            <p className="text-xs text-muted-foreground mt-1">Language: {sub.language}</p>
+                            <p className="text-sm font-medium truncate" title={sub.fileName || sub.title}>
+                              {sub.fileName || sub.title}
+                            </p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <Badge variant="secondary" className="text-xs">
+                                {sub.languageName || sub.language}
+                              </Badge>
+                              {sub.hearingImpaired && (
+                                <Badge variant="outline" className="text-xs">HI</Badge>
+                              )}
+                              <span className="text-xs text-muted-foreground">
+                                {sub.source || 'opensubtitles'}
+                              </span>
+                            </div>
                           </div>
                           <Badge variant="secondary" className="ml-2 shrink-0">
                             Select
