@@ -405,7 +405,7 @@ export function RoomView({ id }: { id: string }) {
   // Host: emit sync every 5s
   useEffect(() => {
     if (!isHost || !socket) return;
-    const kind = videoKind(room.data?.movie?.videoUrl || null);
+    const kind = localVideoUrl ? "direct" : videoKind(room.data?.movie?.videoUrl || null);
     if (kind !== "direct" && kind !== "youtube") return;
     const interval = setInterval(() => {
       const p = playerRef.current;
@@ -413,12 +413,12 @@ export function RoomView({ id }: { id: string }) {
         socket.emit("playback:sync", {
           roomId: id,
           currentTime: p.getCurrentTime(),
-          isPlaying: !p.shouldPlay(),
+          isPlaying: p.isPlaying(),
         });
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [isHost, socket, id, room.data?.movie?.videoUrl]);
+  }, [isHost, socket, id, room.data?.movie?.videoUrl, localVideoUrl]);
 
   const emitSync = useCallback(() => {
     if (!socket || !isHostRef.current) return;
@@ -427,10 +427,39 @@ export function RoomView({ id }: { id: string }) {
     socket.emit("playback:sync", {
       roomId: id,
       currentTime: p.getCurrentTime(),
-      isPlaying: !p.shouldPlay(),
+      isPlaying: p.isPlaying(),
     });
     lastSyncEmit.current = Date.now();
   }, [socket, id]);
+
+  const onVideoTimeUpdate = useCallback(() => {
+    if (!socket || !isHostRef.current) return;
+    const p = playerRef.current;
+    if (!p) return;
+    if (p.isPlaying()) {
+      const now = Date.now();
+      if (now - lastSyncEmit.current > 4000) {
+        lastSyncEmit.current = now;
+        socket.emit("playback:sync", {
+          roomId: id,
+          currentTime: p.getCurrentTime(),
+          isPlaying: true,
+        });
+      }
+    }
+  }, [socket, id]);
+
+  // Custom polling for YouTube to mock timeupdate events
+  useEffect(() => {
+    if (!isHost) return;
+    const kind = localVideoUrl ? "direct" : videoKind(room.data?.movie?.videoUrl || null);
+    if (kind !== "youtube") return;
+
+    const ytInterval = setInterval(() => {
+      onVideoTimeUpdate();
+    }, 1000);
+    return () => clearInterval(ytInterval);
+  }, [isHost, room.data?.movie?.videoUrl, onVideoTimeUpdate, localVideoUrl]);
 
   const handlePlayPause = () => {
     const p = playerRef.current;
@@ -447,7 +476,7 @@ export function RoomView({ id }: { id: string }) {
     setTimeout(emitSync, 100);
   };
 
-  const onVideoTimeUpdate = () => {
+  const onLocalVideoTimeUpdate = () => {
     if (isHost) {
       const p = playerRef.current;
       if (p) setPlayback((pb) => ({ ...pb, currentTime: p.getCurrentTime(), isPlaying: !p.shouldPlay() }));
@@ -662,7 +691,7 @@ export function RoomView({ id }: { id: string }) {
                   onPlay={emitSync}
                   onPause={emitSync}
                   onSeeked={emitSync}
-                  onTimeUpdate={onVideoTimeUpdate}
+                  onTimeUpdate={onLocalVideoTimeUpdate}
                 >
                   {subtitleUrl && (
                     <track

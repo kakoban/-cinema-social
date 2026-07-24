@@ -225,8 +225,8 @@ export function MovieView({ id }: { id: string }) {
   let streamEmbed: string | null = null;
 
   if (m.tmdbId) {
-    // switch to vidlink.pro as it is more stable and less prone to DNS blocks than vidsrc.me
-    streamEmbed = `https://vidlink.pro/movie/${m.tmdbId}`;
+    // switch to autoembed as a reliable fallback, bypassing most common adblock/dns issues
+    streamEmbed = `https://autoembed.co/movie/tmdb/${m.tmdbId}`;
   }
 
   if (m.videoUrl) {
@@ -311,20 +311,31 @@ export function MovieView({ id }: { id: string }) {
                       <Play className="size-4 me-2" /> Watch Free Stream
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-5xl p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-[0_0_50px_-12px_rgba(220,38,38,0.3)] sm:rounded-2xl">
-                    <div className="p-3 text-center text-xs text-muted-foreground bg-gradient-to-b from-black/80 to-transparent border-b border-white/5 flex flex-col gap-1.5 relative z-10">
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="flex h-2 w-2 rounded-full bg-red-600 animate-pulse"></span>
-                        <span className="font-medium text-white/80 tracking-wide uppercase">Free Streaming Mode</span>
+                  <DialogContent className="max-w-5xl p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-2xl sm:rounded-2xl">
+                    <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/80 border-b border-white/10 backdrop-blur-md">
+                      <div className="flex items-center gap-2">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                        </span>
+                        <span className="font-semibold text-sm text-white/90 uppercase tracking-wider">Free Stream</span>
                       </div>
-                      <span className="text-white/40">Provided by external servers. We do not host this content.</span>
-                      <span className="text-yellow-500/80 mt-1">💡 If it doesn't load or buffers, select a different server (like Xps, Vesy) from the player menu.</span>
+                      <div className="text-right">
+                        <p className="text-[10px] text-white/40">External Provider</p>
+                      </div>
                     </div>
                     <div className="aspect-video w-full bg-black relative">
                       <div className="absolute inset-0 flex items-center justify-center -z-10">
                         <Loader2 className="size-8 animate-spin text-red-600/50" />
                       </div>
                       <iframe src={streamEmbed} className="size-full absolute inset-0" allowFullScreen allow="autoplay; fullscreen" />
+                    </div>
+                    <div className="bg-zinc-900 px-4 py-2 flex items-start gap-3">
+                       <span className="text-xl">💡</span>
+                       <div>
+                         <p className="text-xs text-white/80 font-medium">Player not loading?</p>
+                         <p className="text-[11px] text-white/50 mt-0.5">Change the server from the settings gear icon inside the player, or try pausing AdBlockers.</p>
+                       </div>
                     </div>
                   </DialogContent>
                 </Dialog>
