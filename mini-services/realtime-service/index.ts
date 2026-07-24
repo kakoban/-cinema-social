@@ -145,6 +145,15 @@ io.on("connection", (socket: Socket) => {
     io.to(roomId).emit("chat:message", msg);
   });
 
+  socket.on("chat:reaction", (data: { roomId: string; emoji: string; userId: string; username: string }) => {
+    io.to(data.roomId).emit("chat:reaction", {
+      id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+      emoji: data.emoji,
+      userId: data.userId,
+      username: data.username
+    });
+  });
+
   socket.on("chat:typing", (data: { roomId: string; userId: string; username: string }) => {
     socket.to(data.roomId).emit("chat:typing", { userId: data.userId, username: data.username });
   });
@@ -165,6 +174,37 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("CMD:leaveVideo", () => {
+    for (const roomId of socketRooms) {
+      const userInfo = socketUser.get(roomId);
+      if (!userInfo) continue;
+      const room = rooms.get(roomId);
+      if (room) {
+        const member = room.members.get(userInfo.userId);
+        if (member) {
+          member.isVideoChat = false;
+          broadcastMembers(roomId);
+        }
+      }
+    }
+  });
+
+  socket.on("CMD:joinScreen", () => {
+    for (const roomId of socketRooms) {
+      const userInfo = socketUser.get(roomId);
+      if (!userInfo) continue;
+      const room = rooms.get(roomId);
+      if (room) {
+        const member = room.members.get(userInfo.userId);
+        if (member) {
+          member.isVideoChat = true; // reusing isVideoChat flag for screen sharing visibility
+          broadcastMembers(roomId);
+        }
+      }
+    }
+  });
+
+  socket.on("CMD:leaveScreen", () => {
+    // We handle leave same as leaveVideo for simplicity
     for (const roomId of socketRooms) {
       const userInfo = socketUser.get(roomId);
       if (!userInfo) continue;
@@ -205,7 +245,6 @@ io.on("connection", (socket: Socket) => {
         break;
       }
     }
-  });
   });
 
   // Host -> server -> broadcast (with server timestamp for drift compensation)

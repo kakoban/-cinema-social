@@ -2,8 +2,9 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Socket } from "socket.io-client";
-import { Video, VideoOff, Mic, MicOff } from "lucide-react";
+import { Video, VideoOff, Mic, MicOff, MonitorUp, MonitorOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface VideoChatProps {
   socket: Socket | null;
@@ -14,8 +15,9 @@ interface VideoChatProps {
 
 export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
   const [isVideoActive, setIsVideoActive] = useState(false);
+  const [isScreenActive, setIsScreenActive] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  
+
   const localStreamRef = useRef<MediaStream | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   
@@ -85,7 +87,7 @@ export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
 
   // Connect to peers who have video chat active
   useEffect(() => {
-    if (!isVideoActive || !socket) return;
+    if ((!isVideoActive && !isScreenActive) || !socket) return;
 
     members.forEach(async (member) => {
       if (member.userId !== userId && member.isVideoChat && !peerConnectionsRef.current.has(member.userId)) {
@@ -98,7 +100,7 @@ export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
         }
       }
     });
-    
+
     // Cleanup disconnected peers
     peerConnectionsRef.current.forEach((pc, id) => {
       const isMemberVideoActive = members.find(m => m.userId === id)?.isVideoChat;
@@ -113,10 +115,10 @@ export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
       }
     });
 
-  }, [members, isVideoActive, socket, userId, createPeerConnection]);
+  }, [members, isVideoActive, isScreenActive, socket, userId, createPeerConnection]);
 
   const toggleVideo = async () => {
-    if (isVideoActive) {
+    if (isVideoActive || isScreenActive) {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => track.stop());
         localStreamRef.current = null;
@@ -125,8 +127,9 @@ export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
         localVideoRef.current.srcObject = null;
       }
       setIsVideoActive(false);
+      setIsScreenActive(false);
       socket?.emit("CMD:leaveVideo");
-      
+
       // Close all peer connections
       peerConnectionsRef.current.forEach((pc) => pc.close());
       peerConnectionsRef.current.clear();
@@ -139,10 +142,62 @@ export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
           localVideoRef.current.srcObject = stream;
         }
         setIsVideoActive(true);
+        setIsScreenActive(false);
         setIsMuted(false);
         socket?.emit("CMD:joinVideo");
       } catch (err) {
         console.error("Failed to access media devices", err);
+      }
+    }
+  };
+
+  const toggleScreenShare = async () => {
+    if (isVideoActive || isScreenActive) {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => track.stop());
+        localStreamRef.current = null;
+      }
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
+      }
+      setIsVideoActive(false);
+      setIsScreenActive(false);
+      socket?.emit("CMD:leaveScreen");
+
+      // Close all peer connections
+      peerConnectionsRef.current.forEach((pc) => pc.close());
+      peerConnectionsRef.current.clear();
+      setRemoteStreams(new Map());
+    } else {
+      try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+
+        // Handle user stopping screen share via browser UI
+        screenStream.getVideoTracks()[0].onended = () => {
+          if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach((track) => track.stop());
+            localStreamRef.current = null;
+          }
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = null;
+          }
+          setIsScreenActive(false);
+          socket?.emit("CMD:leaveScreen");
+          peerConnectionsRef.current.forEach((pc) => pc.close());
+          peerConnectionsRef.current.clear();
+          setRemoteStreams(new Map());
+        };
+
+        localStreamRef.current = screenStream;
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = screenStream;
+        }
+        setIsScreenActive(true);
+        setIsVideoActive(false);
+        setIsMuted(false);
+        socket?.emit("CMD:joinScreen");
+      } catch (err) {
+        console.error("Failed to share screen", err);
       }
     }
   };
@@ -170,47 +225,55 @@ export function VideoChat({ socket, roomId, userId, members }: VideoChatProps) {
     }
   };
 
-  if (!isVideoActive && members.filter(m => m.isVideoChat && m.userId !== userId).length === 0) {
+  if (!isVideoActive && !isScreenActive && members.filter(m => m.isVideoChat && m.userId !== userId).length === 0) {
      return (
-        <Button variant="outline" size="sm" onClick={toggleVideo} className="gap-2">
-            <Video className="size-4" /> Start Video Chat
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={toggleVideo} className="gap-2">
+              <Video className="size-4" /> Start Video Chat
+          </Button>
+          <Button variant="outline" size="sm" onClick={toggleScreenShare} className="gap-2">
+              <MonitorUp className="size-4" /> Share Screen
+          </Button>
+        </div>
      );
   }
 
   return (
-    <div className="mt-4 flex flex-col gap-4">
+    <div className="mt-4 flex flex-col gap-4 animate-fade-in">
       <div className="flex justify-between items-center">
-        <h3 className="font-semibold text-sm">Video Chat</h3>
+        <h3 className="font-semibold text-sm">Video Chat & Screen Share</h3>
         <div className="flex gap-2">
-          <Button variant={isMuted ? "destructive" : "secondary"} size="icon" onClick={toggleMute} disabled={!isVideoActive}>
+          <Button variant={isMuted ? "destructive" : "secondary"} size="icon" onClick={toggleMute} disabled={!isVideoActive && !isScreenActive}>
             {isMuted ? <MicOff className="size-4" /> : <Mic className="size-4" />}
           </Button>
-          <Button variant={isVideoActive ? "destructive" : "default"} size="icon" onClick={toggleVideo}>
+          <Button variant={isScreenActive ? "destructive" : "secondary"} size="icon" onClick={toggleScreenShare} disabled={isVideoActive}>
+            {isScreenActive ? <MonitorOff className="size-4" /> : <MonitorUp className="size-4" />}
+          </Button>
+          <Button variant={isVideoActive ? "destructive" : "default"} size="icon" onClick={toggleVideo} disabled={isScreenActive}>
             {isVideoActive ? <VideoOff className="size-4" /> : <Video className="size-4" />}
           </Button>
         </div>
       </div>
-      
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-        {isVideoActive && (
-          <div className="relative aspect-video bg-black rounded overflow-hidden">
-             <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />
-             <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-white">You</div>
+        {(isVideoActive || isScreenActive) && (
+          <div className="relative aspect-video bg-black rounded overflow-hidden shadow-lg border border-border">
+             <video ref={localVideoRef} autoPlay playsInline muted className={cn("w-full h-full object-cover", isVideoActive && "transform -scale-x-100")} />
+             <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-xs text-white">You {isScreenActive ? "(Screen)" : ""}</div>
           </div>
         )}
-        
+
         {Array.from(remoteStreams.entries()).map(([id, stream]) => {
           const member = members.find(m => m.userId === id);
           return (
-            <div key={id} className="relative aspect-video bg-black rounded overflow-hidden">
-               <video 
-                 ref={(el) => setRemoteVideoRef(id, el)} 
-                 autoPlay 
-                 playsInline 
-                 className="w-full h-full object-cover" 
+            <div key={id} className="relative aspect-video bg-black rounded overflow-hidden shadow-lg border border-border">
+               <video
+                 ref={(el) => setRemoteVideoRef(id, el)}
+                 autoPlay
+                 playsInline
+                 className="w-full h-full object-cover"
                />
-               <div className="absolute bottom-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-white">
+               <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-xs text-white">
                  {member?.username || id}
                  {member?.isMuted && <MicOff className="size-3 inline ml-1 text-red-500" />}
                </div>

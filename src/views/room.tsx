@@ -17,6 +17,8 @@ import {
   Loader2,
   Film,
   Music,
+  SmilePlus,
+  Subtitles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
@@ -105,12 +108,14 @@ export function RoomView({ id }: { id: string }) {
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [input, setInput] = useState("");
   const [typingUsers, setTypingUsers] = useState<Record<string, { username: string; ts: number }>>({});
+  const [reactions, setReactions] = useState<{ id: string; emoji: string; username: string }[]>([]);
   const [playback, setPlayback] = useState({ currentTime: 0, isPlaying: false });
   const [hostOffline, setHostOffline] = useState(false);
   const [joined, setJoined] = useState(false);
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
   const [localFileName, setLocalFileName] = useState<string | null>(null);
   const [localFileFingerprint, setLocalFileFingerprint] = useState<string | null>(null);
+  const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null);
   const [expectedFileName, setExpectedFileName] = useState<string | null>(null);
   const [expectedFingerprint, setExpectedFingerprint] = useState<string | null>(null);
   const [fingerprintMismatch, setFingerprintMismatch] = useState(false);
@@ -165,6 +170,31 @@ export function RoomView({ id }: { id: string }) {
       });
     }
   };
+
+  const handleSubtitleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // We only need the URL object to supply to the video track
+    // If it's SRT, ideally we convert to VTT. For simplicity, many browsers support simple VTT.
+    // Full support would require an SRT parser/converter, but we can try to feed it if it's VTT.
+
+    // Convert SRT to VTT if needed
+    let finalUrl = "";
+    if (file.name.endsWith(".srt")) {
+        const text = await file.text();
+        // Super simple SRT -> VTT conversion
+        const vttText = "WEBVTT\n\n" + text.replace(/,/g, '.');
+        const blob = new Blob([vttText], { type: "text/vtt" });
+        finalUrl = URL.createObjectURL(blob);
+    } else {
+        finalUrl = URL.createObjectURL(file);
+    }
+
+    if (subtitleUrl) URL.revokeObjectURL(subtitleUrl);
+    setSubtitleUrl(finalUrl);
+  };
+
   const driftFixing = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -285,6 +315,13 @@ export function RoomView({ id }: { id: string }) {
           ...prev,
           [data.userId]: { username: data.username, ts: Date.now() },
         }));
+      });
+      sock.on("chat:reaction", (data: { id: string; emoji: string; username: string }) => {
+        setReactions((prev) => [...prev, data]);
+        // Remove reaction after animation completes (approx 3 seconds)
+        setTimeout(() => {
+          setReactions((prev) => prev.filter((r) => r.id !== data.id));
+        }, 3000);
       });
       sock.on("room:members", (data: { members: RoomMember[] }) => {
         setMembers(data.members || []);
@@ -452,6 +489,16 @@ export function RoomView({ id }: { id: string }) {
     setInput("");
   };
 
+  const sendReaction = (emoji: string) => {
+    if (!socket || !user) return;
+    socket.emit("chat:reaction", {
+      roomId: id,
+      emoji,
+      userId: user.id,
+      username: user.username,
+    });
+  };
+
   const onTyping = () => {
     if (!socket || !user) return;
     if (typingTimer.current) return;
@@ -582,7 +629,20 @@ export function RoomView({ id }: { id: string }) {
                 <p className="text-xs text-muted-foreground mt-1 max-w-sm">{t("rooms.pickMovie")}</p>
               </div>
             ) : kind === "direct" ? (
-              <div className="relative">
+              <div className="relative overflow-hidden">
+                {reactions.map((r, i) => (
+                  <div
+                    key={r.id}
+                    className="absolute z-50 text-4xl pointer-events-none animate-float-up"
+                    style={{
+                      left: `${10 + (Math.random() * 80)}%`,
+                      bottom: "0",
+                      animationDelay: `${i * 0.1}s`
+                    }}
+                  >
+                    {r.emoji}
+                  </div>
+                ))}
                 {isAudio && (
                   <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center pointer-events-none z-10">
                     <div className="size-24 rounded-full bg-primary/20 flex items-center justify-center mb-4 animate-pulse">
@@ -603,7 +663,17 @@ export function RoomView({ id }: { id: string }) {
                   onPause={emitSync}
                   onSeeked={emitSync}
                   onTimeUpdate={onVideoTimeUpdate}
-                />
+                >
+                  {subtitleUrl && (
+                    <track
+                      kind="subtitles"
+                      src={subtitleUrl}
+                      srcLang="fa"
+                      label="Persian"
+                      default
+                    />
+                  )}
+                </video>
                 {!isHost && (
                   <div className="absolute top-2 start-2 bg-black/70 backdrop-blur px-2.5 py-1 rounded-full text-xs text-white flex items-center gap-1.5">
                     <Users className="size-3" />
@@ -620,6 +690,19 @@ export function RoomView({ id }: { id: string }) {
               </div>
             ) : kind === "youtube" && ytId ? (
               <div className="relative">
+                {reactions.map((r, i) => (
+                  <div
+                    key={r.id}
+                    className="absolute z-50 text-4xl pointer-events-none animate-float-up"
+                    style={{
+                      left: `${10 + (Math.random() * 80)}%`,
+                      bottom: "0",
+                      animationDelay: `${i * 0.1}s`
+                    }}
+                  >
+                    {r.emoji}
+                  </div>
+                ))}
                 <YouTube
                   videoId={ytId}
                   id="main-youtube-player"
@@ -705,6 +788,18 @@ export function RoomView({ id }: { id: string }) {
                 type="file"
                 accept="video/mp4,video/webm,video/ogg,audio/mp3,audio/mpeg,audio/ogg"
                 onChange={handleFileChange}
+                className="hidden"
+              />
+            </label>
+            <label className="flex items-center justify-center gap-2 cursor-pointer border border-dashed border-border rounded-lg p-3 hover:border-primary/50 hover:bg-primary/5 transition">
+              <Subtitles className="size-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">
+                {subtitleUrl ? "Subtitle loaded" : "Add Subtitle (.srt, .vtt)"}
+              </span>
+              <input
+                type="file"
+                accept=".srt,.vtt"
+                onChange={handleSubtitleChange}
                 className="hidden"
               />
             </label>
@@ -820,6 +915,27 @@ export function RoomView({ id }: { id: string }) {
                     placeholder={t("rooms.messagePlaceholder")}
                     className="bg-card"
                   />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button size="icon" variant="outline" type="button">
+                        <SmilePlus className="size-4 text-muted-foreground" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-2 mb-2" side="top" align="center">
+                      <div className="flex items-center gap-1">
+                        {["😂", "❤️", "😮", "👏", "🔥", "😢"].map((emoji) => (
+                          <Button
+                            key={emoji}
+                            variant="ghost"
+                            className="h-10 w-10 text-xl"
+                            onClick={() => sendReaction(emoji)}
+                          >
+                            {emoji}
+                          </Button>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                   <Button size="icon" onClick={sendMessage} disabled={!input.trim()} className="bg-red-600 hover:bg-red-700">
                     <Send className="size-4" />
                   </Button>
