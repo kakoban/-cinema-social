@@ -403,7 +403,7 @@ io.on("connection", (socket: Socket) => {
   });
 });
 
-const PORT = 3003;
+const PORT = parseInt(process.env.PORT || "3003");
 httpServer.listen(PORT, () => {
   console.log(`[realtime] Cinema Social realtime service running on port ${PORT}`);
 });
