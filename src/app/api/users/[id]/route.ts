@@ -43,6 +43,7 @@ export async function GET(
     language: user.language,
     theme: user.theme,
     createdAt: user.createdAt,
+    watchHours: user.watchHours,
     reviewCount,
     followersCount,
     followingCount,

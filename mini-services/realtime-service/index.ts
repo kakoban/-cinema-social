@@ -1,7 +1,29 @@
 import { createServer } from "http";
 import { Server, Socket } from "socket.io";
 
-const httpServer = createServer();
+const httpServer = createServer((req, res) => {
+  // Simple internal API to bridge from Next.js server to Socket.io
+  if (req.method === "POST" && req.url === "/api/notify") {
+    let body = "";
+    req.on("data", chunk => body += chunk.toString());
+    req.on("end", () => {
+      try {
+        const data = JSON.parse(body);
+        if (data.userId && data.content) {
+          io.to(`user:${data.userId}`).emit("notification:new", data);
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end("Bad Request");
+      }
+    });
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
 const io = new Server(httpServer, {
   // path is "/" so Caddy can forward via XTransformPort
   path: "/",
@@ -245,6 +267,23 @@ io.on("connection", (socket: Socket) => {
         break;
       }
     }
+  });
+
+// Real-time notifications for users (e.g. invites, mentions)
+  socket.on("user:register", (data: { userId: string }) => {
+    socket.join(`user:${data.userId}`);
+  });
+
+  socket.on("notify:invite", (data: { targetUserId: string; roomId: string; roomName: string; fromUsername: string }) => {
+    io.to(`user:${data.targetUserId}`).emit("notification:new", {
+      type: "ROOM_INVITE",
+      content: `${data.fromUsername} invited you to room: ${data.roomName}`,
+      link: `/room/${data.roomId}`,
+    });
+  });
+
+  socket.on("dm:send", (data: { targetUserId: string; message: any }) => {
+    io.to(`user:${data.targetUserId}`).emit("dm:receive", data.message);
   });
 
   // Host -> server -> broadcast (with server timestamp for drift compensation)

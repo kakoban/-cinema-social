@@ -65,6 +65,12 @@ export function HomeView() {
     enabled: !!user,
   });
 
+  const recommendations = useQuery<FeaturedMovie[]>({
+    queryKey: ["recommendations"],
+    queryFn: () => api.get<FeaturedMovie[]>("/api/movies/recommendations").then((r) => r.data!),
+    enabled: !!user,
+  });
+
   return (
     <div>
       {/* Hero */}
@@ -211,6 +217,46 @@ export function HomeView() {
             </div>
           )}
         </section>
+
+        {/* Recommendations */}
+        {user && (
+          <section>
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+                  <Star className="size-5 text-yellow-500" />
+                  Recommended for You
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">Based on your ratings and watchlist</p>
+              </div>
+            </div>
+            {recommendations.isLoading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <MovieCardSkeleton key={i} />
+                ))}
+              </div>
+            ) : recommendations.data?.length ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {recommendations.data.map((m) => (
+                  <MovieCard
+                    key={m.id}
+                    movie={{
+                      id: m.id,
+                      title: m.title,
+                      poster: m.poster,
+                      year: m.year,
+                      rating: m.rating ?? undefined,
+                      source: m.source,
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Rate some movies to get recommendations!</p>
+            )}
+          </section>
+        )}
 
         {/* Activity feed */}
         {user && (

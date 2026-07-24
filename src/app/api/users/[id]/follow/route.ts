@@ -25,19 +25,32 @@ export async function POST(
     await db.follow.create({
       data: { followerId: me.id, followingId: target.id },
     });
+
+    await db.notification.create({
+      data: {
+        userId: target.id,
+        actorId: me.id,
+        type: "FOLLOW",
+        content: `${me.username} started following you`,
+        link: `#/profile/${me.username}`,
+      },
+    });
+
+    // Notify via HTTP call to realtime service
+    fetch(`http://localhost:3003/api/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: target.id,
+        type: "FOLLOW",
+        content: `${me.username} started following you`,
+        link: `#/profile/${me.username}`,
+      }),
+    }).catch(e => console.error("Realtime notify failed:", e));
+
   } catch {
     // already following — fine
   }
-
-  await db.notification.create({
-    data: {
-      userId: target.id,
-      actorId: me.id,
-      type: "FOLLOW",
-      content: `${me.username} started following you`,
-      link: `#/profile/${me.username}`,
-    },
-  });
 
   return ok({ following: true });
 }

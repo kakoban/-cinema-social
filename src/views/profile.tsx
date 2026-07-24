@@ -38,6 +38,7 @@ interface Profile {
   reviewCount: number;
   followersCount: number;
   followingCount: number;
+  watchHours: number;
   isFollowing: boolean;
   isMe: boolean;
 }
@@ -141,6 +142,10 @@ export function ProfileView({ username }: { username: string }) {
 
             <div className="flex items-center gap-6 mt-4">
               <div>
+                <span className="font-bold">{p.watchHours}</span>{" "}
+                <span className="text-sm text-muted-foreground">Hours Watched</span>
+              </div>
+              <div>
                 <span className="font-bold">{p.reviewCount}</span>{" "}
                 <span className="text-sm text-muted-foreground">{t("profile.reviews")}</span>
               </div>
@@ -161,15 +166,20 @@ export function ProfileView({ username }: { username: string }) {
                 <Pencil className="size-4 me-2" /> {t("profile.editProfile")}
               </Button>
             ) : me ? (
-              p.isFollowing ? (
-                <Button variant="outline" onClick={() => unfollow.mutate()} disabled={unfollow.isPending}>
-                  <UserCheck className="size-4 me-2" /> {t("profile.unfollow")}
+              <div className="flex flex-col gap-2 w-full">
+                {p.isFollowing ? (
+                  <Button variant="outline" onClick={() => unfollow.mutate()} disabled={unfollow.isPending}>
+                    <UserCheck className="size-4 me-2" /> {t("profile.unfollow")}
+                  </Button>
+                ) : (
+                  <Button className="bg-red-600 hover:bg-red-700" onClick={() => follow.mutate()} disabled={follow.isPending}>
+                    <UserPlus className="size-4 me-2" /> {t("profile.follow")}
+                  </Button>
+                )}
+                <Button variant="secondary" onClick={() => navigate(`/messages/${p.username}`)}>
+                  Message
                 </Button>
-              ) : (
-                <Button className="bg-red-600 hover:bg-red-700" onClick={() => follow.mutate()} disabled={follow.isPending}>
-                  <UserPlus className="size-4 me-2" /> {t("profile.follow")}
-                </Button>
-              )
+              </div>
             ) : null}
           </div>
         </div>

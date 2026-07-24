@@ -20,6 +20,7 @@ import { WatchlistView } from "@/views/watchlist";
 import { SettingsView } from "@/views/settings";
 import { AdminView } from "@/views/admin";
 import { PlatformsView } from "@/views/platforms";
+import { MessagesView } from "@/views/messages";
 
 function Router() {
   const route = useRouterStore((s) => s.route);
@@ -42,6 +43,9 @@ function Router() {
   } else if (segments[0] === "room" && segments[1]) {
     view = <RoomView id={segments[1]} />;
     key = `room-${segments[1]}`;
+  } else if (segments[0] === "messages") {
+    view = <MessagesView targetUsername={segments[1]} />;
+    key = `messages-${segments[1] || "index"}`;
   } else if (segments[0] === "login") {
     view = <LoginView />;
   } else if (segments[0] === "register") {

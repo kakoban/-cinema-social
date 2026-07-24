@@ -71,6 +71,20 @@ export async function POST(
         link: `#/movie/${movieId}`,
       })),
     });
+
+    // Notify via realtime
+    for (const f of followers) {
+      fetch(`http://localhost:3003/api/notify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: f.followerId,
+          type: "REVIEW",
+          content: `${user.username} reviewed ${movie?.title || "a movie"}`,
+          link: `#/movie/${movieId}`,
+        }),
+      }).catch(() => null);
+    }
   }
 
   return ok(review);

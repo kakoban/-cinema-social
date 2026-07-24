@@ -2,6 +2,8 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bell, Check, CheckCheck } from "lucide-react";
+import { useEffect } from "react";
+import { io } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -53,6 +55,30 @@ export function NotificationBell() {
     mutationFn: () => api.put("/api/notifications/read-all"),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
+
+  useEffect(() => {
+    if (!user) return;
+    const sock = io("/?XTransformPort=3003", {
+      transports: ["websocket", "polling"],
+      reconnection: true,
+    });
+
+    sock.emit("user:register", { userId: user.id });
+
+    sock.on("notification:new", (data) => {
+      // Invalidate to fetch fresh data from server or optimistically add
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+      // We could also show a toast here for instant feedback
+      if (typeof window !== "undefined") {
+         const { toast } = require("sonner");
+         toast.info("New Notification", { description: data.content });
+      }
+    });
+
+    return () => {
+      sock.disconnect();
+    };
+  }, [user, qc]);
 
   if (!user) return null;
   const unread = data?.unreadCount ?? 0;

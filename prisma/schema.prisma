@@ -20,6 +20,7 @@ model User {
   theme        String   @default("dark") // dark | light | system
   banned       Boolean  @default(false)
   tokenVersion Int      @default(0)
+  watchHours   Int      @default(0) // Gamification: Total hours watched in rooms
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -27,7 +28,8 @@ model User {
   watchlists     Watchlist[]
   followers      Follow[]    @relation("Following")
   following      Follow[]    @relation("Follower")
-  messages       Message[]
+  messages       Message[]   @relation("MessageSender")
+  receivedMsgs   Message[]   @relation("MessageReceiver")
   roomMembers    RoomMember[]
   notifications  Notification[] @relation("NotifOwner")
   notifActor     Notification[] @relation("NotifActor")
@@ -108,16 +110,19 @@ model RoomMember {
 }
 
 model Message {
-  id        String   @id @default(cuid())
-  content   String
-  userId    String?
-  roomId    String
-  type      String   @default("TEXT") // TEXT | SYSTEM
-  createdAt DateTime @default(now())
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  content    String
+  userId     String?
+  roomId     String?  // Made optional for DMs
+  receiverId String?  // Added for DMs
+  type       String   @default("TEXT") // TEXT | SYSTEM | DIRECT
+  createdAt  DateTime @default(now())
+  user       User?    @relation("MessageSender", fields: [userId], references: [id], onDelete: SetNull)
+  receiver   User?    @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: SetNull)
+  room       Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@index([roomId])
+  @@index([receiverId])
 }
 
 model Review {

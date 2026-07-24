@@ -80,6 +80,7 @@ export function Header() {
       <NavLink to="/explore" label={t("nav.explore")} />
       <NavLink to="/platforms" label="Free Platforms" />
       <NavLink to="/rooms" label={t("nav.rooms")} />
+      {user && <NavLink to="/messages" label="Messages" />}
       {user && <NavLink to="/watchlist" label={t("nav.watchlist")} />}
     </>
   );
