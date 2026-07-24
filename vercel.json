@@ -1,19 +1,5 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
-  "env": {
-    "DATABASE_URL": "@database-url",
-    "JWT_SECRET": "@jwt-secret",
-    "JWT_ACCESS_EXPIRES": "15m",
-    "JWT_REFRESH_EXPIRES": "7d",
-    "TMDB_API_KEY": "@tmdb-api-key",
-    "NEXT_PUBLIC_SOCKET_URL": "@socket-url"
-  },
-  "regions": ["iad1"],
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "regions": ["iad1"]
 }
