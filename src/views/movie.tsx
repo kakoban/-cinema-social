@@ -225,8 +225,8 @@ export function MovieView({ id }: { id: string }) {
   let streamEmbed: string | null = null;
 
   if (m.tmdbId) {
-    // ponytail: single provider; add UI provider-switcher when more needed
-    streamEmbed = `https://vidsrc.me/embed/movie?tmdb=${m.tmdbId}`;
+    // switch to vidlink.pro as it is more stable and less prone to DNS blocks than vidsrc.me
+    streamEmbed = `https://vidlink.pro/movie/${m.tmdbId}`;
   }
 
   if (m.videoUrl) {
