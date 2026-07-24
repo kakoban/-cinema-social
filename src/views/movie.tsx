@@ -226,16 +226,15 @@ export function MovieView({ id }: { id: string }) {
   let streamEmbed: string | null = null;
 
   const tmdbServers = m.tmdbId ? [
-    { name: "Server 1 (Smashy)", url: `https://player.smashy.stream/movie/${m.tmdbId}` },
-    { name: "Server 2 (AutoEmbed)", url: `https://autoembed.co/movie/tmdb/${m.tmdbId}` },
-    { name: "Server 3 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${m.tmdbId}` },
-    { name: "Server 4 (VidSrc.xyz)", url: `https://vidsrc.xyz/embed/movie/${m.tmdbId}` },
-    { name: "Server 5 (VidLink)", url: `https://vidlink.pro/movie/${m.tmdbId}` },
-    { name: "Server 6 (2Embed)", url: `https://www.2embed.cc/embed/${m.tmdbId}` },
+    { name: "Server 1 (VidSrc)", url: `https://vidsrc.me/embed/movie?tmdb=${m.tmdbId}` },
+    { name: "Server 2 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${m.tmdbId}` },
+    { name: "Server 3 (VidSrc.xyz)", url: `https://vidsrc.xyz/embed/movie/${m.tmdbId}` },
+    { name: "Server 4 (VidLink)", url: `https://vidlink.pro/movie/${m.tmdbId}` },
+    { name: "Server 5 (2Embed)", url: `https://www.2embed.cc/embed/${m.tmdbId}` },
   ] : [];
 
-  if (m.tmdbId) {
-    streamEmbed = tmdbServers[activeServerIdx]?.url || `https://player.smashy.stream/movie/${m.tmdbId}`;
+  if (m.tmdbId && tmdbServers.length > 0) {
+    streamEmbed = tmdbServers[activeServerIdx]?.url || tmdbServers[0].url;
   }
 
   if (m.videoUrl) {

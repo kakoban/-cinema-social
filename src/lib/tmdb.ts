@@ -98,7 +98,7 @@ export async function ensureMovieFromTmdb(
       genre,
       runtime: detail.runtime ?? null,
       source: "TMDB",
-      videoUrl: `https://player.smashy.stream/movie/${detail.id}`,
+      videoUrl: null, // TMDB doesn't provide video files
     },
   });
 }

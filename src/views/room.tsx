@@ -724,18 +724,17 @@ export function RoomView({ id }: { id: string }) {
   const r = room.data;
 
   const roomTmdbServers = r?.movie?.tmdbId ? [
-    { name: "Server 1 (Smashy)", url: `https://player.smashy.stream/movie/${r.movie.tmdbId}` },
-    { name: "Server 2 (VidSrc.me)", url: `https://vidsrc.me/embed/movie?tmdb=${r.movie.tmdbId}` },
-    { name: "Server 3 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${r.movie.tmdbId}` },
-    { name: "Server 4 (VidSrc.xyz)", url: `https://vidsrc.xyz/embed/movie/${r.movie.tmdbId}` },
-    { name: "Server 5 (VidLink)", url: `https://vidlink.pro/movie/${r.movie.tmdbId}` },
-    { name: "Server 6 (2Embed)", url: `https://www.2embed.cc/embed/${r.movie.tmdbId}` },
+    { name: "Server 1 (VidSrc)", url: `https://vidsrc.me/embed/movie?tmdb=${r.movie.tmdbId}` },
+    { name: "Server 2 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${r.movie.tmdbId}` },
+    { name: "Server 3 (VidSrc.xyz)", url: `https://vidsrc.xyz/embed/movie/${r.movie.tmdbId}` },
+    { name: "Server 4 (VidLink)", url: `https://vidlink.pro/movie/${r.movie.tmdbId}` },
+    { name: "Server 5 (2Embed)", url: `https://www.2embed.cc/embed/${r.movie.tmdbId}` },
   ] : [];
 
   // Use local file if available, otherwise use active mirror or room movie URL
   const rawMovieUrl = r.movie?.tmdbId && roomTmdbServers[activeRoomServerIdx]
     ? roomTmdbServers[activeRoomServerIdx].url
-    : (r.movie?.videoUrl || (r.movie?.tmdbId ? `https://player.smashy.stream/movie/${r.movie.tmdbId}` : null));
+    : (r.movie?.videoUrl || (r.movie?.tmdbId && roomTmdbServers[0] ? roomTmdbServers[0].url : null));
   const videoUrl = localVideoUrl || rawMovieUrl;
   const kind = localVideoUrl ? ("direct" as const) : videoKind(rawMovieUrl);
   const ytId = kind === "youtube" && videoUrl ? youtubeId(videoUrl) : null;
