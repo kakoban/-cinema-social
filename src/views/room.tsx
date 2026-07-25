@@ -847,9 +847,9 @@ export function RoomView({ id }: { id: string }) {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
+      <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6">
         {/* Player */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-4 sticky top-16 lg:static z-40 bg-background lg:bg-transparent pb-4 lg:pb-0">
           <Card className="p-0 overflow-hidden bg-black relative">
             {/* Overlay: Host is playing local file, viewer hasn't selected yet or selected wrong file */}
             {expectedFileName && !isHost && (!localVideoUrl || fingerprintMismatch) && (
@@ -1218,8 +1218,8 @@ export function RoomView({ id }: { id: string }) {
         </div>
 
         {/* Chat + members */}
-        <div className="space-y-4">
-          <Card className="flex flex-col h-[60vh] min-h-[420px]">
+        <div className="flex-1 lg:flex-none space-y-4">
+          <Card className="flex flex-col flex-1 min-h-[400px] lg:h-[60vh] lg:min-h-[420px]">
             <div className="p-3 border-b border-border flex items-center justify-between">
               <span className="font-semibold text-sm flex items-center gap-2">
                 {t("rooms.chat")}
