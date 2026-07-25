@@ -85,11 +85,6 @@ export function LoginView() {
           </button>
         </div>
       </Card>
-
-      <div className="mt-4 rounded-lg border border-dashed border-border p-3 text-center text-xs text-muted-foreground">
-        <p className="font-medium text-card-foreground">{t("auth.demoAdmin")}</p>
-        <p className="mt-1">{t("auth.demoAdminHint")}</p>
-      </div>
     </div>
   );
 }

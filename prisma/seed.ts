@@ -3,21 +3,29 @@ import { db } from "../src/lib/db";
 import { hashPassword } from "../src/lib/auth";
 
 async function main() {
-  const adminEmail = "admin@cinema.dev";
+  const adminEmail = "nafa.1395@gmail.com";
   let admin = await db.user.findUnique({ where: { email: adminEmail } });
   if (!admin) {
     admin = await db.user.create({
       data: {
-        username: "admin",
+        username: "nafa_admin",
         email: adminEmail,
-        password: await hashPassword("admin123"),
+        password: await hashPassword("Kbka@222223224"),
         role: "ADMIN",
         bio: "Cinema Social administrator",
       },
     });
     console.log("Created admin:", admin.username);
   } else {
-    console.log("Admin already exists");
+    // Ensure the password is updated if it already existed under this email
+    await db.user.update({
+      where: { email: adminEmail },
+      data: {
+        password: await hashPassword("Kbka@222223224"),
+        role: "ADMIN"
+      }
+    });
+    console.log("Admin already exists, password updated");
   }
 
   // a demo user
