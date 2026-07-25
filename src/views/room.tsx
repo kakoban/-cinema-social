@@ -583,16 +583,22 @@ export function RoomView({ id }: { id: string }) {
     if (!socket || !isHostRef.current) return;
     const p = playerRef.current;
     if (!p) return;
-    if (p.isPlaying()) {
-      const now = Date.now();
-      if (now - lastSyncEmit.current > 4000) {
-        lastSyncEmit.current = now;
-        socket.emit("playback:sync", {
-          roomId: id,
-          currentTime: p.getCurrentTime(),
-          isPlaying: true,
-        });
+
+    try {
+      const playing = p.isPlaying && typeof p.isPlaying === 'function' ? p.isPlaying() : !p.shouldPlay();
+      if (playing) {
+        const now = Date.now();
+        if (now - lastSyncEmit.current > 4000) {
+          lastSyncEmit.current = now;
+          socket.emit("playback:sync", {
+            roomId: id,
+            currentTime: p.getCurrentTime(),
+            isPlaying: true,
+          });
+        }
       }
+    } catch (e) {
+      console.warn("Failed to update video time:", e);
     }
   }, [socket, id]);
 
@@ -626,7 +632,14 @@ export function RoomView({ id }: { id: string }) {
   const onLocalVideoTimeUpdate = () => {
     if (isHost) {
       const p = playerRef.current;
-      if (p) setPlayback((pb) => ({ ...pb, currentTime: p.getCurrentTime(), isPlaying: !p.shouldPlay() }));
+      if (p) {
+        try {
+          const playing = p.isPlaying && typeof p.isPlaying === 'function' ? p.isPlaying() : !p.shouldPlay();
+          setPlayback((pb) => ({ ...pb, currentTime: p.getCurrentTime(), isPlaying: playing }));
+        } catch (e) {
+          // ignore
+        }
+      }
     }
   };
 
