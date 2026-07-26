@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import {
@@ -16,6 +16,14 @@ import {
   Film,
   Loader2,
   AlertCircle,
+  ChevronDown,
+  Check,
+  Zap,
+  Maximize2,
+  Minimize2,
+  Sparkles,
+  Bot,
+  Subtitles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -42,6 +50,15 @@ import { useAuthStore } from "@/stores/auth-store";
 import { useI18n } from "@/i18n";
 import { UserAvatar } from "@/components/cinema/user-avatar";
 import { StarRating, RatingInput } from "@/components/cinema/star-rating";
+import { SubtitleSelector } from "@/components/cinema/subtitle-selector";
+import { SubtitleOverlay } from "@/components/cinema/subtitle-overlay";
+import { AiLoadingOverlay } from "@/components/cinema/ai-loading-overlay";
+
+export interface ServerConfig {
+  name: string;
+  url: string;
+  sandbox?: boolean;
+}
 
 interface MovieDetail {
   id: string;
@@ -111,8 +128,206 @@ export function MovieView({ id }: { id: string }) {
     enabled: !!user,
   });
 
-  const [showTrailer, setShowTrailer] = useState(false);
+  const [activeModal, setActiveModal] = useState<"watch" | "stream" | "trailer" | null>(null);
   const [activeServerIdx, setActiveServerIdx] = useState(0);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [subtitleTrackUrl, setSubtitleTrackUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (subtitleTrackUrl) {
+      toast.success("زیرنویس نمایش داده شد! در صورت عدم هماهنگی از دکمه «هماهنگی زیرنویس» روی پلیر استفاده کنید.");
+    }
+  }, [subtitleTrackUrl]);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  const toggleFullscreen = () => {
+    const el = modalRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+      if (el.requestFullscreen) {
+        el.requestFullscreen().catch(() => setIsMaximized((v) => !v));
+      } else if ((el as any).webkitRequestFullscreen) {
+        (el as any).webkitRequestFullscreen();
+      } else {
+        setIsMaximized((v) => !v);
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => setIsMaximized(false));
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      } else {
+        setIsMaximized(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsMaximized(!!document.fullscreenElement || !!(document as any).webkitFullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFsChange);
+    document.addEventListener("webkitfullscreenchange", handleFsChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFsChange);
+      document.removeEventListener("webkitfullscreenchange", handleFsChange);
+    };
+  }, []);
+
+  // Intercept SmashyStream and player actions (Watch Party, Bookmark, Search, Like) to route to our site
+  useEffect(() => {
+    if (!activeModal || activeModal !== "stream") return;
+
+    const currentMovie = movie.data;
+
+    const handleWatchPartyAction = async () => {
+      if (!user) {
+        toast.error("برای ساخت اتاق واچ پارتی لطفاً ابتدا وارد حساب کاربری خود شوید.");
+        navigate("/login");
+        return;
+      }
+      if (!currentMovie) return;
+
+      toast.info("در حال ایجاد و انتقال به اتاق واچ پارتی سینما...");
+      try {
+        const res = await api.post<{ id: string }>("/api/rooms", {
+          name: `واچ پارتی: ${currentMovie.title}`,
+          description: `تماشای گروهی و هم‌زمان فیلم ${currentMovie.title}`,
+          movieId: currentMovie.id,
+          isPublic: true,
+        });
+        if (res.data?.id) {
+          setActiveModal(null);
+          navigate(`/room/${res.data.id}`);
+        }
+      } catch (err: any) {
+        console.error("Watch party creation error:", err);
+        toast.error("خطا در ایجاد اتاق واچ پارتی سینما");
+      }
+    };
+
+    const handleBookmarkAction = async () => {
+      if (!user) {
+        toast.error("برای افزودن به لیست تماشا ابتدا وارد حساب کاربری شوید.");
+        return;
+      }
+      if (!currentMovie) return;
+
+      try {
+        let userLists = watchlists.data || [];
+        let targetListId: string | undefined = userLists[0]?.id;
+
+        if (!targetListId) {
+          const createRes = await api.post<{ id: string }>("/api/watchlists", { name: "لیست من" });
+          targetListId = createRes.data?.id;
+        }
+
+        if (targetListId) {
+          await api.post(`/api/watchlists/${targetListId}/movies`, { movieId: currentMovie.id });
+          qc.invalidateQueries({ queryKey: ["watchlists"] });
+          toast.success(`فیلم «${currentMovie.title}» به لیست تماشای شما اضافه شد!`);
+        }
+      } catch (err) {
+        toast.error("خطا در افزودن به لیست تماشا");
+      }
+    };
+
+    // 1. PostMessage Event Listener
+    const handleMessage = (event: MessageEvent) => {
+      if (!event.data) return;
+      const rawData = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
+      const lower = rawData.toLowerCase();
+
+      // Check for Watch Party keywords
+      if (
+        lower.includes("watchparty") || 
+        lower.includes("watch_party") || 
+        lower.includes("create_room") || 
+        lower.includes("party")
+      ) {
+        handleWatchPartyAction();
+      }
+      // Check for Bookmark / Watchlist keywords
+      else if (lower.includes("bookmark") || lower.includes("favorite") || lower.includes("watchlist")) {
+        handleBookmarkAction();
+      }
+      // Check for Search keywords
+      else if (lower.includes("search") && !lower.includes("subtitle")) {
+        setActiveModal(null);
+        navigate("/movies");
+      }
+      // Check for Like / Review keywords
+      else if (lower.includes("like") || lower.includes("review")) {
+        setActiveModal(null);
+        const reviewSection = document.getElementById("reviews-section");
+        if (reviewSection) {
+          reviewSection.scrollIntoView({ behavior: "smooth" });
+        }
+      }
+    };
+
+    // 2. Override window.open to catch popup links from SmashyStream
+    const originalOpen = window.open;
+    window.open = function (url?: string | URL, target?: string, features?: string) {
+      const urlStr = url ? url.toString().toLowerCase() : "";
+      if (
+        urlStr.includes("watchparty") || 
+        urlStr.includes("watch_party") || 
+        urlStr.includes("smashy") || 
+        urlStr.includes("party") || 
+        urlStr.includes("room")
+      ) {
+        handleWatchPartyAction();
+        return null;
+      }
+      if (urlStr.includes("bookmark") || urlStr.includes("favorite")) {
+        handleBookmarkAction();
+        return null;
+      }
+      return originalOpen.apply(this, arguments as any);
+    };
+
+    window.addEventListener("message", handleMessage);
+
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      window.open = originalOpen;
+    };
+  }, [activeModal, user, movie.data, watchlists.data, qc, navigate]);
+
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiRecommendation, setAiRecommendation] = useState<string | null>(null);
+
+  const runAiServerFinder = async () => {
+    if (!movie.data) return;
+    setAiLoading(true);
+    setAiRecommendation(null);
+    try {
+      const tmdb = movie.data.tmdbId || movie.data.id;
+      const imdb = (movie.data as any).imdbId || "";
+      const title = movie.data.title;
+      const res = await fetch(`/api/movies/ai-server-finder?tmdbId=${tmdb}&imdbId=${imdb}&title=${encodeURIComponent(title)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.aiRecommendation) {
+          setAiRecommendation(data.aiRecommendation);
+        }
+        if (data.recommendedServer?.name) {
+          const recName = data.recommendedServer.name.toLowerCase();
+          const targetIdx = allServers.findIndex((s) => s.name.toLowerCase().includes(recName) || recName.includes(s.name.toLowerCase()));
+          if (targetIdx !== -1) {
+            setActiveServerIdx(targetIdx);
+          } else if (typeof data.recommendedIndex === "number" && data.recommendedIndex < allServers.length) {
+            setActiveServerIdx(data.recommendedIndex);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("AI Server Finder error:", err);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const [reviewContent, setReviewContent] = useState("");
   const [reviewRating, setReviewRating] = useState(7);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -223,20 +438,6 @@ export function MovieView({ id }: { id: string }) {
 
   // determine watch embed url
   let watchEmbed: string | null = null;
-  let streamEmbed: string | null = null;
-
-  const tmdbServers = m.tmdbId ? [
-    { name: "Server 1 (VidSrc)", url: `https://vidsrc.me/embed/movie?tmdb=${m.tmdbId}` },
-    { name: "Server 2 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${m.tmdbId}` },
-    { name: "Server 3 (VidSrc.xyz)", url: `https://vidsrc.xyz/embed/movie/${m.tmdbId}` },
-    { name: "Server 4 (VidLink)", url: `https://vidlink.pro/movie/${m.tmdbId}` },
-    { name: "Server 5 (2Embed)", url: `https://www.2embed.cc/embed/${m.tmdbId}` },
-  ] : [];
-
-  if (m.tmdbId && tmdbServers.length > 0) {
-    streamEmbed = tmdbServers[activeServerIdx]?.url || tmdbServers[0].url;
-  }
-
   if (m.videoUrl) {
     if (m.source === "ARCHIVE" || m.videoUrl.includes("archive.org")) {
       const aid = m.archiveId || m.videoUrl.split("/").pop();
@@ -253,6 +454,33 @@ export function MovieView({ id }: { id: string }) {
       watchEmbed = m.videoUrl;
     }
   }
+
+  const allServers: ServerConfig[] = [];
+
+  if (m.tmdbId) {
+    allServers.push(
+      { name: "Server 1 (AutoEmbed)", url: `https://player.autoembed.cc/embed/movie/${m.tmdbId}` },
+      { name: "Server 2 (VidSrc.in)", url: `https://vidsrc.in/embed/movie/${m.tmdbId}` },
+      { name: "Server 3 (VidLink Pro)", url: `https://vidlink.pro/movie/${m.tmdbId}` },
+      { name: "Server 4 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${m.tmdbId}` },
+      { name: "Server 5 (2Embed)", url: `https://www.2embed.cc/embed/${m.tmdbId}` },
+      { name: "Server 6 (VidSrc.icu)", url: `https://vidsrc.icu/embed/movie/${m.tmdbId}` },
+      { name: "Server 7 (VidBinge)", url: `https://vidbinge.dev/embed/movie/${m.tmdbId}`, sandbox: true }
+    );
+  }
+
+  if (watchEmbed) {
+    allServers.push({ name: "Archive / Direct", url: watchEmbed });
+  }
+
+  const activeServer = allServers[activeServerIdx] || allServers[0];
+  const activeServerUrl = activeServer?.url || null;
+
+  const handleNextServer = () => {
+    if (allServers.length === 0) return;
+    setActiveServerIdx((prev) => (prev + 1) % allServers.length);
+    toast.info("Switched to next stream server");
+  };
 
   return (
     <div>
@@ -297,88 +525,155 @@ export function MovieView({ id }: { id: string }) {
             </div>
 
             <div className="flex flex-col gap-2 mt-4 max-w-xs mx-auto md:mx-0">
-              {watchEmbed && (
-                <Dialog open={showTrailer && !!watchEmbed} onOpenChange={setShowTrailer}>
-                  <DialogTrigger asChild>
-                    <Button className="bg-red-600 hover:bg-red-700 w-full">
-                      <Play className="size-4 me-2" /> {t("movie.watchNow")}
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-5xl p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-2xl sm:rounded-2xl">
-                    <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/80 border-b border-white/10 backdrop-blur-md">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm text-white/90 uppercase tracking-wider">Free Watch</span>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] text-white/40">Archive.org Provider</p>
-                      </div>
-                    </div>
-                    <div className="aspect-video w-full bg-black relative">
-                      <div className="absolute inset-0 flex items-center justify-center -z-10">
-                        <Loader2 className="size-8 animate-spin text-red-600/50" />
-                      </div>
-                      <iframe src={watchEmbed} className="size-full absolute inset-0" allowFullScreen allow="autoplay; fullscreen" />
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              )}
-
-              {streamEmbed && !watchEmbed && (
-                <Dialog open={showTrailer && !!streamEmbed} onOpenChange={setShowTrailer}>
-                  <DialogTrigger asChild>
-                    <Button className="bg-red-600 hover:bg-red-700 w-full">
-                      <Play className="size-4 me-2" /> Watch Free Stream
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-5xl p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-2xl sm:rounded-2xl">
-                    <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/80 border-b border-white/10 backdrop-blur-md flex-wrap gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                        </span>
-                        <span className="font-semibold text-sm text-white/90 uppercase tracking-wider">Free Stream</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 overflow-x-auto">
-                        {tmdbServers.map((srv, idx) => (
-                          <Button
-                            key={idx}
-                            size="sm"
-                            variant={activeServerIdx === idx ? "default" : "outline"}
-                            className={`h-7 text-xs px-2.5 ${activeServerIdx === idx ? "bg-red-600 hover:bg-red-700 text-white" : "bg-black/40 text-white/80 border-white/20 hover:bg-white/10"}`}
-                            onClick={() => setActiveServerIdx(idx)}
-                          >
-                            {srv.name}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="aspect-video w-full bg-black relative">
-                      <div className="absolute inset-0 flex items-center justify-center -z-10">
-                        <Loader2 className="size-8 animate-spin text-red-600/50" />
-                      </div>
-                      <iframe key={streamEmbed} src={streamEmbed} className="size-full absolute inset-0" allowFullScreen allow="autoplay; encrypted-media; fullscreen; picture-in-picture" referrerPolicy="no-referrer" />
-                    </div>
-                    <div className="bg-zinc-900 px-4 py-2 flex items-start gap-3">
-                       <span className="text-xl">💡</span>
-                       <div>
-                         <p className="text-xs text-white/80 font-medium">Server error or not loading?</p>
-                         <p className="text-[11px] text-white/50 mt-0.5">Click any server button above (Server 1 to 5) to switch mirrors instantly.</p>
-                       </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+              {allServers.length > 0 && (
+                <Button className="bg-red-600 hover:bg-red-700 w-full" onClick={() => setActiveModal("stream")}>
+                  <Play className="size-4 me-2" /> {t("movie.watchNow")}
+                </Button>
               )}
 
               {m.trailerUrl && (
-                <Dialog open={showTrailer && !watchEmbed && !streamEmbed} onOpenChange={setShowTrailer}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="w-full">
-                      <Youtube className="size-4 me-2" /> {t("movie.trailer")}
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-4xl p-0 overflow-hidden">
-                    <div className="aspect-video">
+                <Button variant="outline" className="w-full" onClick={() => setActiveModal("trailer")}>
+                  <Youtube className="size-4 me-2" /> {t("movie.trailer")}
+                </Button>
+              )}
+
+              <Dialog open={activeModal !== null} onOpenChange={(open) => !open && setActiveModal(null)}>
+                <DialogContent className="sm:max-w-5xl md:max-w-6xl w-[95vw] p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-2xl sm:rounded-2xl" dir="ltr">
+                  {activeModal === "stream" && activeServerUrl && (
+                    <div ref={modalRef} className={isMaximized ? "fixed inset-0 z-[99999] w-screen h-screen bg-black flex flex-col overflow-hidden" : "flex flex-col"} dir="ltr">
+                      {/* Premium Stream Header Bar */}
+                      <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/90 border-b border-white/10 backdrop-blur-md gap-3 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="relative flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                          </span>
+                          <span className="font-bold text-xs sm:text-sm text-white uppercase tracking-wider">Stream Player</span>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {allServers.length > 1 && (
+                            <>
+                              {/* Server Selector Dropdown */}
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 text-xs bg-zinc-900/90 border-white/20 text-white hover:bg-white/10 gap-1.5 px-3 rounded-lg max-w-[160px] sm:max-w-[240px] justify-between shadow-sm"
+                                  >
+                                    <span className="text-red-400 font-semibold shrink-0">Server:</span>
+                                    <span className="truncate">{allServers[activeServerIdx]?.name || "Select"}</span>
+                                    <ChevronDown className="size-3.5 text-white/50 shrink-0" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-56 bg-zinc-900/95 backdrop-blur-xl border-white/15 text-white p-1 shadow-2xl z-[100]">
+                                  {allServers.map((srv, idx) => (
+                                    <DropdownMenuItem
+                                      key={idx}
+                                      className={`text-xs p-2 rounded-md cursor-pointer flex items-center justify-between ${activeServerIdx === idx ? "bg-red-600 text-white font-medium" : "hover:bg-white/10 text-white/80"}`}
+                                      onClick={() => setActiveServerIdx(idx)}
+                                    >
+                                      <span className="truncate">{srv.name}</span>
+                                      {activeServerIdx === idx && <Check className="size-3.5 shrink-0 ms-1 text-white" />}
+                                    </DropdownMenuItem>
+                                  ))}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+
+                              {/* AI Smart Server Finder Button */}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs bg-purple-950/80 border-purple-500/40 text-purple-200 hover:bg-purple-900/60 gap-1.5 px-2.5 rounded-lg font-medium shadow-md shrink-0"
+                                onClick={runAiServerFinder}
+                                disabled={aiLoading}
+                                title="Run OpenRouter AI Server Health Finder"
+                              >
+                                {aiLoading ? (
+                                  <Loader2 className="size-3.5 animate-spin text-purple-400" />
+                                ) : (
+                                  <Sparkles className="size-3.5 text-purple-400 fill-purple-400/30" />
+                                )}
+                                <span className="hidden sm:inline">AI Finder</span>
+                              </Button>
+
+                              {/* Smart Next Server Button */}
+                              <Button
+                                size="sm"
+                                className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white gap-1 px-2.5 rounded-lg font-medium shadow-md shrink-0"
+                                onClick={handleNextServer}
+                                title="Try Next Server"
+                              >
+                                <Zap className="size-3.5 fill-current text-yellow-300 shrink-0" />
+                                <span className="hidden sm:inline">Next Server</span>
+                              </Button>
+                            </>
+                          )}
+
+                          {/* Fullscreen Button */}
+                          <SubtitleSelector title={m.title} onSubtitleReady={setSubtitleTrackUrl} />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 p-0 bg-zinc-900/90 border-white/20 text-white hover:bg-white/10 shrink-0"
+                            onClick={toggleFullscreen}
+                            title={isMaximized ? "Exit Fullscreen" : "Fullscreen"}
+                          >
+                            {isMaximized ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Video Container */}
+                      <div className={`w-full bg-black relative ${isMaximized ? "flex-1 min-h-0" : "aspect-video"}`}>
+                        {aiLoading && (
+                          <AiLoadingOverlay recommendation={aiRecommendation} />
+                        )}
+
+                        <div className="absolute inset-0 flex items-center justify-center -z-10">
+                          <Loader2 className="size-8 animate-spin text-red-600/50" />
+                        </div>
+                        <iframe
+                          key={activeServerUrl}
+                          src={activeServerUrl}
+                          className="size-full absolute inset-0 border-0"
+                          allowFullScreen={true}
+                          allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; accelerometer *; gyroscope *"
+                          sandbox={activeServer?.sandbox ? "allow-same-origin allow-scripts allow-presentation allow-forms" : undefined}
+                          referrerPolicy="no-referrer"
+                        />
+                        <SubtitleOverlay vttUrl={subtitleTrackUrl} />
+                      </div>
+
+                      {/* Footer Tip Bar */}
+                      <div className="bg-zinc-950/90 px-4 py-2.5 flex items-center justify-between gap-3 border-t border-white/10" dir="ltr">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {aiRecommendation ? (
+                            <>
+                              <Bot className="size-4 text-purple-400 shrink-0" />
+                              <p className="text-xs text-purple-200 font-medium truncate" dir="rtl">
+                                🤖 هوش مصنوعی: {aiRecommendation}
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-sm shrink-0">💡</span>
+                              <p className="text-xs text-white/70 truncate">
+                                If current mirror is slow or blocked, use <strong className="text-purple-400">AI Finder</strong> or click <strong className="text-red-400 font-semibold">Next Server</strong>.
+                              </p>
+                            </>
+                          )}
+                        </div>
+                        <Badge variant="outline" className="text-[10px] text-white/60 border-white/15 shrink-0 hidden md:inline-flex">
+                          HD 1080p
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeModal === "trailer" && trailerKey && (
+                    <div className="aspect-video" dir="ltr">
                       <iframe
                         src={`https://www.youtube.com/embed/${trailerKey}`}
                         className="size-full"
@@ -386,9 +681,9 @@ export function MovieView({ id }: { id: string }) {
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       />
                     </div>
-                  </DialogContent>
-                </Dialog>
-              )}
+                  )}
+                </DialogContent>
+              </Dialog>
 
               {user ? (
                 <>

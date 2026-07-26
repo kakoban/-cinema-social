@@ -20,6 +20,13 @@ import {
   SmilePlus,
   Subtitles,
   Search,
+  ChevronDown,
+  Check,
+  Zap,
+  Sparkles,
+  Bot,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -30,6 +37,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
@@ -39,7 +53,11 @@ import { useI18n } from "@/i18n";
 import { UserAvatar } from "@/components/cinema/user-avatar";
 import YouTube from "react-youtube";
 import { Player, HTMLPlayer, YouTubePlayer } from "@/components/cinema/player";
+import { SubtitleSelector } from "@/components/cinema/subtitle-selector";
+import { SubtitleOverlay } from "@/components/cinema/subtitle-overlay";
+import { AiLoadingOverlay } from "@/components/cinema/ai-loading-overlay";
 import { VideoChat } from "@/components/cinema/video-chat";
+import type { ServerConfig } from "@/views/movie";
 
 interface RoomMember {
   userId: string;
@@ -66,6 +84,7 @@ interface RoomDetail {
   host: { id: string; username: string; avatar: string | null };
   movie: {
     id: string;
+    tmdbId?: number | null;
     title: string;
     poster: string | null;
     videoUrl: string | null;
@@ -103,7 +122,11 @@ export function RoomView({ id }: { id: string }) {
 
   const room = useQuery<RoomDetail>({
     queryKey: ["room", id],
-    queryFn: () => api.get<RoomDetail>(`/api/rooms/${id}`).then((r) => r.data!),
+    queryFn: async () => {
+      const r = await api.get<RoomDetail>(`/api/rooms/${id}`);
+      if (!r.data) throw new Error(r.error || "Room not found");
+      return r.data;
+    },
   });
 
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -123,6 +146,10 @@ export function RoomView({ id }: { id: string }) {
   const [expectedFingerprint, setExpectedFingerprint] = useState<string | null>(null);
   const [fingerprintMismatch, setFingerprintMismatch] = useState(false);
   const [subtitleSearchOpen, setSubtitleSearchOpen] = useState(false);
+  const handleSubtitleReady = (url: string) => {
+    if (subtitleUrl) URL.revokeObjectURL(subtitleUrl);
+    setSubtitleUrl(url);
+  };
   const [subtitlesSearching, setSubtitlesSearching] = useState(false);
   const [subtitleResults, setSubtitleResults] = useState<any[]>([]);
   const [subtitleSource, setSubtitleSource] = useState<'opensubtitles' | 'subscene'>('subscene');
@@ -135,6 +162,122 @@ export function RoomView({ id }: { id: string }) {
   const [customMovieUrl, setCustomMovieUrl] = useState("");
   const [customMovieTitle, setCustomMovieTitle] = useState("");
   const [activeRoomServerIdx, setActiveRoomServerIdx] = useState(0);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiRecommendation, setAiRecommendation] = useState<string | null>(null);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+
+  const toggleFullscreen = () => {
+    const el = playerContainerRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+      if (el.requestFullscreen) {
+        el.requestFullscreen().catch(() => setIsMaximized((v) => !v));
+      } else if ((el as any).webkitRequestFullscreen) {
+        (el as any).webkitRequestFullscreen();
+      } else {
+        setIsMaximized((v) => !v);
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => setIsMaximized(false));
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      } else {
+        setIsMaximized(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsMaximized(!!document.fullscreenElement || !!(document as any).webkitFullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFsChange);
+    document.addEventListener("webkitfullscreenchange", handleFsChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFsChange);
+      document.removeEventListener("webkitfullscreenchange", handleFsChange);
+    };
+  }, []);
+
+  // Intercept SmashyStream player actions while inside a room
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (!event.data) return;
+      const rawData = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
+      const lower = rawData.toLowerCase();
+
+      if (
+        lower.includes("watchparty") || 
+        lower.includes("watch_party") || 
+        lower.includes("create_room") || 
+        lower.includes("party")
+      ) {
+        toast.info("شما در حال حاضر داخل اتاق واچ پارتی سینما هستید و پخش برای همه اعضا هم‌زمان است!");
+      }
+    };
+
+    const originalOpen = window.open;
+    window.open = function (url?: string | URL, target?: string, features?: string) {
+      const urlStr = url ? url.toString().toLowerCase() : "";
+      if (
+        urlStr.includes("watchparty") || 
+        urlStr.includes("watch_party") || 
+        urlStr.includes("smashy") || 
+        urlStr.includes("party") || 
+        urlStr.includes("room")
+      ) {
+        toast.info("شما در حال حاضر داخل اتاق واچ پارتی سینما هستید!");
+        return null;
+      }
+      return originalOpen.apply(this, arguments as any);
+    };
+
+    window.addEventListener("message", handleMessage);
+
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      window.open = originalOpen;
+    };
+  }, []);
+
+  const runAiServerFinder = async () => {
+    const movieObj = room.data?.movie;
+    if (!movieObj) return;
+    setAiLoading(true);
+    setAiRecommendation(null);
+    try {
+      const tmdb = (movieObj as any).tmdbId || movieObj.id;
+      const title = movieObj.title || "Movie";
+      const res = await fetch(`/api/movies/ai-server-finder?tmdbId=${tmdb}&title=${encodeURIComponent(title)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.aiRecommendation) {
+          setAiRecommendation(data.aiRecommendation);
+        }
+        if (data.recommendedServer?.name && roomTmdbServers.length > 0) {
+          const recName = data.recommendedServer.name.toLowerCase();
+          const targetIdx = roomTmdbServers.findIndex((s) => s.name.toLowerCase().includes(recName) || recName.includes(s.name.toLowerCase()));
+          if (targetIdx !== -1) {
+            setActiveRoomServerIdx(targetIdx);
+          } else if (typeof data.recommendedIndex === "number" && data.recommendedIndex < roomTmdbServers.length) {
+            setActiveRoomServerIdx(data.recommendedIndex);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("AI Server Finder error in room:", err);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleNextRoomServer = () => {
+    if (roomTmdbServers.length > 1) {
+      setActiveRoomServerIdx((prev) => (prev + 1) % roomTmdbServers.length);
+    }
+  };
 
   const handleSearchMovies = async (q: string) => {
     setMovieSearchQuery(q);
@@ -144,7 +287,7 @@ export function RoomView({ id }: { id: string }) {
     }
     setIsSearchingMovies(true);
     try {
-      const res = await api.get<{ data: { results: any[] } }>(`/api/movies/search?q=${encodeURIComponent(q)}`);
+      const res = await api.get<{ results: any[] }>(`/api/movies/search?q=${encodeURIComponent(q)}`);
       setMovieSearchResults(res.data?.results || []);
     } catch {
       toast.error("Failed to search movies");
@@ -155,7 +298,7 @@ export function RoomView({ id }: { id: string }) {
 
   const handleSelectMovie = async (mId: string) => {
     try {
-      const res = await api.put<{ data: RoomDetail }>(`/api/rooms/${id}`, { movieId: mId });
+      const res = await api.put<RoomDetail>(`/api/rooms/${id}`, { movieId: mId });
       setChangeMovieOpen(false);
       qc.invalidateQueries({ queryKey: ["room", id] });
       toast.success("Movie changed successfully!");
@@ -171,7 +314,7 @@ export function RoomView({ id }: { id: string }) {
     try {
       let targetId = item.id;
       if (!targetId && item.tmdbId) {
-        const mRes = await api.get<{ data: any }>(`/api/movies/${item.tmdbId}`);
+        const mRes = await api.get<{ id: string }>(`/api/movies/${item.tmdbId}`);
         targetId = mRes.data?.id;
       }
       if (targetId) {
@@ -185,7 +328,7 @@ export function RoomView({ id }: { id: string }) {
   const handleAddCustomUrlMovie = async () => {
     if (!customMovieUrl.trim()) return;
     try {
-      const created = await api.post<{ data: { id: string } }>("/api/movies/custom", {
+      const created = await api.post<{ id: string }>("/api/movies/custom", {
         title: customMovieTitle.trim() || "Custom Movie Stream",
         videoUrl: customMovieUrl.trim(),
       });
@@ -288,7 +431,7 @@ export function RoomView({ id }: { id: string }) {
         endpoint = `/api/subtitles?action=search&q=${encodeURIComponent(q)}`;
       }
       
-      const res = await api.get<{ data: any[] }>(endpoint);
+      const res = await api.get<any[]>(endpoint);
       setSubtitleResults(res.data || []);
     } catch (err) {
       toast.error("Failed to search subtitles");
@@ -417,7 +560,9 @@ export function RoomView({ id }: { id: string }) {
       if (cancelled) return;
       setJoined(true);
 
-      sock = io("/?XTransformPort=3003", {
+      const targetSocketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:3003" : "/?XTransformPort=3003");
+      sock = io(targetSocketUrl, {
+        path: "/",
         transports: ["websocket", "polling"],
         reconnection: true,
       });
@@ -736,17 +881,20 @@ export function RoomView({ id }: { id: string }) {
 
   const r = room.data;
 
-  const roomTmdbServers = r?.movie?.tmdbId ? [
-    { name: "Server 1 (VidSrc)", url: `https://vidsrc.me/embed/movie?tmdb=${r.movie.tmdbId}` },
-    { name: "Server 2 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${r.movie.tmdbId}` },
-    { name: "Server 3 (VidSrc.xyz)", url: `https://vidsrc.xyz/embed/movie/${r.movie.tmdbId}` },
-    { name: "Server 4 (VidLink)", url: `https://vidlink.pro/movie/${r.movie.tmdbId}` },
+  const roomTmdbServers: ServerConfig[] = r?.movie?.tmdbId ? [
+    { name: "Server 1 (AutoEmbed)", url: `https://player.autoembed.cc/embed/movie/${r.movie.tmdbId}` },
+    { name: "Server 2 (VidSrc.in)", url: `https://vidsrc.in/embed/movie/${r.movie.tmdbId}` },
+    { name: "Server 3 (VidLink Pro)", url: `https://vidlink.pro/movie/${r.movie.tmdbId}` },
+    { name: "Server 4 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${r.movie.tmdbId}` },
     { name: "Server 5 (2Embed)", url: `https://www.2embed.cc/embed/${r.movie.tmdbId}` },
+    { name: "Server 6 (VidSrc.icu)", url: `https://vidsrc.icu/embed/movie/${r.movie.tmdbId}` },
+    { name: "Server 7 (VidBinge)", url: `https://vidbinge.dev/embed/movie/${r.movie.tmdbId}`, sandbox: true }
   ] : [];
 
   // Use local file if available, otherwise use active mirror or room movie URL
-  const rawMovieUrl = r.movie?.tmdbId && roomTmdbServers[activeRoomServerIdx]
-    ? roomTmdbServers[activeRoomServerIdx].url
+  const activeRoomServer = roomTmdbServers[activeRoomServerIdx] || roomTmdbServers[0];
+  const rawMovieUrl = r.movie?.tmdbId && activeRoomServer
+    ? activeRoomServer.url
     : (r.movie?.videoUrl || (r.movie?.tmdbId && roomTmdbServers[0] ? roomTmdbServers[0].url : null));
   const videoUrl = localVideoUrl || rawMovieUrl;
   const kind = localVideoUrl ? ("direct" as const) : videoKind(rawMovieUrl);
@@ -860,10 +1008,47 @@ export function RoomView({ id }: { id: string }) {
         </div>
       </div>
 
-      <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6">
-        {/* Player */}
-        <div className="lg:col-span-2 space-y-4 sticky top-16 lg:static z-40 bg-background lg:bg-transparent pb-4 lg:pb-0">
-          <Card className="p-0 overflow-hidden bg-black relative">
+      <div className="flex flex-col lg:grid lg:grid-cols-3 gap-6 h-[calc(100vh-10rem)] lg:h-auto">
+        {/* Player column uses contents on mobile so its children participate in the root flex-col */}
+        <div className="contents lg:block lg:col-span-2 lg:space-y-4 shrink-0">
+          <Card className="p-0 overflow-hidden bg-black relative order-1 lg:order-none z-40 sticky top-16 lg:static w-full">
+            {/* Mobile Members Button & Bottom Sheet */}
+            <div className="lg:hidden absolute top-3 end-3 z-40">
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 px-2.5 bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/20 rounded-full text-xs flex items-center gap-1.5 shadow-lg"
+                  >
+                    <Users className="size-3.5 text-red-400" />
+                    <span>{members.length || r.memberCount}</span>
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="bottom" className="rounded-t-2xl max-h-[70vh] bg-zinc-950/95 border-t border-white/10 text-white p-4">
+                  <SheetHeader className="p-0 pb-3 border-b border-white/10 flex flex-row items-center justify-between">
+                    <SheetTitle className="text-white text-base font-bold flex items-center gap-2">
+                      <Users className="size-4 text-red-500" />
+                      {t("rooms.membersTitle")} ({members.length || r.memberCount})
+                    </SheetTitle>
+                  </SheetHeader>
+                  <ScrollArea className="max-h-[50vh] pt-3">
+                    <div className="space-y-2">
+                      {(members.length ? members : r.members.map((m) => ({ userId: m.user.id, username: m.user.username, isHost: m.role === "HOST" }))).map((m) => (
+                        <div key={m.userId} className="flex items-center gap-3 p-2 rounded-xl bg-white/5 border border-white/5">
+                          <UserAvatar username={m.username} size={32} />
+                          <span className="text-sm font-medium flex-1 truncate">{m.username}</span>
+                          {m.isHost && <Crown className="size-4 text-yellow-500 shrink-0" />}
+                          <Badge variant="outline" className="text-xs border-white/20 text-white/80 shrink-0">
+                            {m.isHost ? t("rooms.host") : t("rooms.viewer")}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </SheetContent>
+              </Sheet>
+            </div>
             {/* Overlay: Host is playing local file, viewer hasn't selected yet or selected wrong file */}
             {expectedFileName && !isHost && (!localVideoUrl || fingerprintMismatch) && (
               <div className="absolute inset-0 z-20 bg-black/95 flex flex-col items-center justify-center p-8 text-center">
@@ -928,7 +1113,7 @@ export function RoomView({ id }: { id: string }) {
                   ref={videoRef}
                   src={videoUrl!}
                   className={`w-full bg-black ${isAudio ? "h-32" : "aspect-video"}`}
-                  controls={isHost}
+                  controls={true}
                   playsInline
                   onPlay={emitSync}
                   onPause={emitSync}
@@ -1001,40 +1186,207 @@ export function RoomView({ id }: { id: string }) {
                 )}
               </div>
             ) : (
-              <div className="relative">
-                {roomTmdbServers.length > 0 && (
-                  <div className="bg-zinc-950 px-3 py-1.5 border-b border-white/10 flex items-center justify-between gap-2 overflow-x-auto">
-                    <span className="text-xs text-white/70 font-medium shrink-0">Mirror Server:</span>
-                    <div className="flex items-center gap-1">
-                      {roomTmdbServers.map((srv, idx) => (
+              <div ref={playerContainerRef} className={cn("relative overflow-hidden bg-black flex flex-col", isMaximized && "fixed inset-0 z-[99999] w-screen h-screen")}>
+                {/* Premium Stream Header Bar */}
+                <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-950/90 border-b border-white/10 backdrop-blur-md gap-2.5 shrink-0" dir="ltr">
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                    </span>
+                    <span className="font-bold text-xs sm:text-sm text-white uppercase tracking-wider hidden sm:inline">Room Stream</span>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {roomTmdbServers.length > 0 && (
+                      <>
+                        {/* Server Selector Dropdown */}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs bg-zinc-900/90 border-white/20 text-white hover:bg-white/10 gap-1.5 px-2.5 rounded-lg max-w-[150px] sm:max-w-[220px] justify-between shadow-sm"
+                            >
+                              <span className="text-red-400 font-semibold shrink-0">Server:</span>
+                              <span className="truncate">{roomTmdbServers[activeRoomServerIdx]?.name || "Select"}</span>
+                              <ChevronDown className="size-3.5 text-white/50 shrink-0" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56 bg-zinc-900/95 backdrop-blur-xl border-white/15 text-white p-1 shadow-2xl z-[100]">
+                            {roomTmdbServers.map((srv, idx) => (
+                              <DropdownMenuItem
+                                key={idx}
+                                className={`text-xs p-2 rounded-md cursor-pointer flex items-center justify-between ${activeRoomServerIdx === idx ? "bg-red-600 text-white font-medium" : "hover:bg-white/10 text-white/80"}`}
+                                onClick={() => setActiveRoomServerIdx(idx)}
+                              >
+                                <span className="truncate">{srv.name}</span>
+                                {activeRoomServerIdx === idx && <Check className="size-3.5 shrink-0 ms-1 text-white" />}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        {/* AI Smart Server Finder Button */}
                         <Button
-                          key={idx}
                           size="sm"
-                          variant={activeRoomServerIdx === idx ? "default" : "outline"}
-                          className={`h-6 text-[11px] px-2 ${activeRoomServerIdx === idx ? "bg-red-600 hover:bg-red-700 text-white" : "bg-black/40 text-white/80 border-white/20 hover:bg-white/10"}`}
-                          onClick={() => setActiveRoomServerIdx(idx)}
+                          variant="outline"
+                          className="h-7 text-xs bg-purple-950/80 border-purple-500/40 text-purple-200 hover:bg-purple-900/60 gap-1 px-2 rounded-lg font-medium shadow-md shrink-0"
+                          onClick={runAiServerFinder}
+                          disabled={aiLoading}
+                          title="Run AI Server Health Finder"
                         >
-                          {srv.name}
+                          {aiLoading ? (
+                            <Loader2 className="size-3.5 animate-spin text-purple-400" />
+                          ) : (
+                            <Sparkles className="size-3.5 text-purple-400 fill-purple-400/30" />
+                          )}
+                          <span className="hidden sm:inline">AI Finder</span>
                         </Button>
-                      ))}
+
+                        {/* Smart Next Server Button */}
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white gap-1 px-2 rounded-lg font-medium shadow-md shrink-0"
+                          onClick={handleNextRoomServer}
+                          title="Try Next Server"
+                        >
+                          <Zap className="size-3.5 fill-current text-yellow-300 shrink-0" />
+                          <span className="hidden sm:inline">Next</span>
+                        </Button>
+                      </>
+                    )}
+
+                    {/* Fullscreen Button */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 w-7 p-0 bg-zinc-900/90 border-white/20 text-white hover:bg-white/10 shrink-0"
+                      onClick={toggleFullscreen}
+                      title={isMaximized ? "Exit Fullscreen" : "Fullscreen"}
+                    >
+                      {isMaximized ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Video Iframe Container */}
+                <div className={cn("w-full bg-black relative", isMaximized ? "flex-1 min-h-0" : "aspect-video")}>
+                  {aiLoading && (
+                    <AiLoadingOverlay recommendation={aiRecommendation} />
+                  )}
+
+                  <iframe
+                    key={videoUrl}
+                    src={videoUrl!}
+                    className="size-full absolute inset-0 border-0"
+                    allowFullScreen={true}
+                    allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; accelerometer *; gyroscope *"
+                    sandbox={activeRoomServer?.sandbox ? "allow-same-origin allow-scripts allow-presentation allow-forms" : undefined}
+                    referrerPolicy="no-referrer"
+                  />
+                  <SubtitleOverlay vttUrl={subtitleUrl} />
+                  {!isHost && (
+                    <div className="absolute top-2 start-2 bg-black/75 backdrop-blur px-2.5 py-1 rounded-full text-xs text-white border border-white/10 shadow-lg pointer-events-none">
+                      {t("rooms.syncedPlayback")}
                     </div>
+                  )}
+                </div>
+
+                {/* Footer Tip & AI Recommendation Bar */}
+                <div className="bg-zinc-950/90 px-3 py-1.5 flex items-center justify-between gap-2 border-t border-white/10 shrink-0" dir="ltr">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {aiRecommendation ? (
+                      <>
+                        <Bot className="size-3.5 text-purple-400 shrink-0" />
+                        <p className="text-[11px] text-purple-200 font-medium truncate" dir="rtl">
+                          🤖 هوش مصنوعی: {aiRecommendation}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-xs shrink-0">💡</span>
+                        <p className="text-[11px] text-white/70 truncate">
+                          If mirror is slow, click <strong className="text-purple-400 font-semibold">AI Finder</strong> or switch servers via top dropdown.
+                        </p>
+                      </>
+                    )}
                   </div>
-                )}
-                <iframe
-                  key={videoUrl}
-                  src={videoUrl!}
-                  className="aspect-video w-full"
-                  allowFullScreen
-                  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-                  referrerPolicy="no-referrer"
-                />
-                {!isHost && (
-                  <div className="absolute top-2 start-2 bg-black/70 backdrop-blur px-2.5 py-1 rounded-full text-xs text-white">
-                    {t("rooms.syncedPlayback")}
-                  </div>
-                )}
+                  <Badge variant="outline" className="text-[9px] text-white/60 border-white/15 shrink-0 hidden md:inline-flex">
+                    Watch Party HD
+                  </Badge>
+                </div>
               </div>
             )}
+
+            {/* Mobile Instagram Live Style Overlay Chat */}
+            <div className="lg:hidden absolute bottom-0 inset-x-0 z-30 pointer-events-auto bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-10 pb-2 px-3">
+              {/* Floating Messages (last 4) */}
+              <div className="space-y-1.5 mb-2 max-h-32 overflow-y-auto no-scrollbar flex flex-col justify-end">
+                {messages.slice(-4).map((msg) =>
+                  msg.type === "SYSTEM" ? (
+                    <div key={msg.id} className="text-[10px] text-white/70 italic bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-full self-start">
+                      {msg.content}
+                    </div>
+                  ) : (
+                    <div key={msg.id} className="flex items-start gap-1.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl text-xs text-white max-w-[88%] border border-white/10 shadow-lg">
+                      <span className="font-semibold text-red-400 shrink-0">{msg.username}:</span>
+                      <span className="break-words text-white/90">{msg.content}</span>
+                    </div>
+                  )
+                )}
+                {typingList.length > 0 && (
+                  <p className="text-[10px] text-white/70 italic px-2">
+                    {typingList[0].username} is typing...
+                  </p>
+                )}
+              </div>
+
+              {/* Quick Reaction Emojis + Mobile Input */}
+              {user && (
+                <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-0.5 bg-black/60 backdrop-blur-md border border-white/15 rounded-full px-1 py-0.5 shrink-0">
+                    {["❤️", "😂", "🔥", "👏"].map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        className="text-sm active:scale-125 transition px-1"
+                        onClick={() => sendReaction(emoji)}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex-1 flex items-center gap-1 bg-black/70 backdrop-blur-md border border-white/20 rounded-full px-3 py-1">
+                    <input
+                      type="text"
+                      value={input}
+                      onChange={(e) => {
+                        setInput(e.target.value);
+                        onTyping();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage();
+                        }
+                      }}
+                      placeholder={t("rooms.messagePlaceholder")}
+                      className="w-full bg-transparent text-xs text-white placeholder:text-white/50 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={sendMessage}
+                      disabled={!input.trim()}
+                      className="text-red-500 disabled:opacity-40 p-1 shrink-0"
+                    >
+                      <Send className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </Card>
 
           {/* Host controls (native video only) */}
@@ -1063,7 +1415,7 @@ export function RoomView({ id }: { id: string }) {
           )}
 
           {/* Local File Sync */}
-          <Card className="p-4">
+          <Card className="p-4 order-4 lg:order-none w-full shrink-0">
             <h3 className="font-semibold mb-3 flex items-center gap-2">
               <Film className="size-4 text-primary" /> Local File Sync
             </h3>
@@ -1095,96 +1447,7 @@ export function RoomView({ id }: { id: string }) {
                   className="hidden"
                 />
               </label>
-              <Dialog open={subtitleSearchOpen} onOpenChange={setSubtitleSearchOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="h-auto p-3" onClick={searchSubtitles}>
-                    <Search className="size-4" />
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Search Subtitles</DialogTitle>
-                  </DialogHeader>
-                  
-                  {/* Source Tabs */}
-                  <div className="flex gap-2 mb-4">
-                    <Button
-                      variant={subtitleSource === 'subscene' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => {
-                        setSubtitleSource('subscene');
-                        setSubtitleResults([]);
-                      }}
-                    >
-                      Subscene (رایگان)
-                    </Button>
-                    <Button
-                      variant={subtitleSource === 'opensubtitles' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => {
-                        setSubtitleSource('opensubtitles');
-                        setSubtitleResults([]);
-                      }}
-                    >
-                      OpenSubtitles
-                    </Button>
-                  </div>
-
-                  {/* Search Input */}
-                  <div className="flex gap-2 mb-4">
-                    <Input
-                      placeholder="Search subtitles..."
-                      value={subtitleQuery}
-                      onChange={(e) => setSubtitleQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && searchSubtitles()}
-                    />
-                    <Button onClick={searchSubtitles} disabled={subtitlesSearching}>
-                      {subtitlesSearching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-                    </Button>
-                  </div>
-
-                  {/* Results */}
-                  <div className="max-h-[300px] overflow-y-auto space-y-2">
-                    {subtitlesSearching ? (
-                      <div className="flex justify-center p-4">
-                        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : subtitleResults.length === 0 ? (
-                      <p className="text-center text-sm text-muted-foreground">
-                        {subtitleQuery ? 'No subtitles found' : 'Enter a search query'}
-                      </p>
-                    ) : (
-                      subtitleResults.map((sub, i) => (
-                        <button
-                          key={i}
-                          onClick={() => downloadAndSetSubtitle(sub.fileId || sub.id)}
-                          className="w-full text-left p-3 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition flex items-center justify-between"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium truncate" title={sub.fileName || sub.title}>
-                              {sub.fileName || sub.title}
-                            </p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <Badge variant="secondary" className="text-xs">
-                                {sub.languageName || sub.language}
-                              </Badge>
-                              {sub.hearingImpaired && (
-                                <Badge variant="outline" className="text-xs">HI</Badge>
-                              )}
-                              <span className="text-xs text-muted-foreground">
-                                {sub.source || 'opensubtitles'}
-                              </span>
-                            </div>
-                          </div>
-                          <Badge variant="secondary" className="ml-2 shrink-0">
-                            Select
-                          </Badge>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </DialogContent>
-              </Dialog>
+              <SubtitleSelector title={room.data?.movie?.title || ""} onSubtitleReady={handleSubtitleReady} />
             </div>
             {localFileName && !fingerprintMismatch && (
               <p className="text-xs text-green-500 mt-2 flex items-center gap-1">
@@ -1211,7 +1474,7 @@ export function RoomView({ id }: { id: string }) {
           </Card>
 
           {/* Movie info */}
-          <div className="w-full">
+          <div className="w-full order-5 lg:order-none shrink-0">
             <VideoChat
               socket={socket}
               roomId={id}
@@ -1221,7 +1484,7 @@ export function RoomView({ id }: { id: string }) {
           </div>
 
           {r.movie && (
-            <Card className="p-4">
+            <Card className="p-4 order-6 lg:order-none w-full shrink-0">
               <h3 className="font-semibold mb-1">{r.movie.title}</h3>
               {r.movie.description && (
                 <p className="text-sm text-muted-foreground line-clamp-3">{r.movie.description}</p>
@@ -1231,9 +1494,9 @@ export function RoomView({ id }: { id: string }) {
         </div>
 
         {/* Chat + members */}
-        <div className="flex-1 lg:flex-none space-y-4">
-          <Card className="flex flex-col flex-1 min-h-[400px] lg:h-[60vh] lg:min-h-[420px]">
-            <div className="p-3 border-b border-border flex items-center justify-between">
+        <div className="flex-1 min-h-0 flex flex-col space-y-4">
+          <Card className="hidden lg:flex flex-col flex-1 min-h-0 lg:h-[60vh] lg:min-h-[420px]">
+            <div className="p-3 border-b border-border flex items-center justify-between shrink-0">
               <span className="font-semibold text-sm flex items-center gap-2">
                 {t("rooms.chat")}
               </span>
