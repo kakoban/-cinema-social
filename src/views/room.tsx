@@ -895,13 +895,7 @@ export function RoomView({ id }: { id: string }) {
   const roomTmdbServers: ServerConfig[] = r?.movie?.tmdbId ? [
     // ✅ Live-tested working servers (sorted by reliability)
     { name: "VidLink Pro", url: `https://vidlink.pro/movie/${r.movie.tmdbId}`, sandbox: false },
-    { name: "2Embed", url: `https://www.2embed.cc/embed/${r.movie.tmdbId}`, sandbox: defaultSandbox },
-    { name: "NontonGo", url: `https://www.nontongo.win/embed/movie/${r.movie.tmdbId}`, sandbox: false },
     
-    { name: "SmashyStream", url: `https://player.smashy.stream/movie/${r.movie.tmdbId}`, sandbox: defaultSandbox },
-    { name: "AutoEmbed", url: `https://player.autoembed.cc/embed/movie/${r.movie.tmdbId}`, sandbox: defaultSandbox },
-    { name: "VidSrc.net", url: `https://vidsrc.net/embed/movie/${r.movie.tmdbId}`, sandbox: defaultSandbox },
-    { name: "MultiEmbed", url: `https://multiembed.mov/directstream.php?video_id=${r.movie.tmdbId}&tmdb=1`, sandbox: defaultSandbox }
   ] : [];
 
   // Use local file if available, otherwise use active mirror or room movie URL
