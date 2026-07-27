@@ -487,7 +487,7 @@ export function MovieView({ id }: { id: string }) {
       { name: "VidLink Pro", url: `https://vidlink.pro/movie/${m.tmdbId}`, sandbox: false },
       { name: "2Embed", url: `https://www.2embed.cc/embed/${m.tmdbId}`, sandbox: defaultSandbox },
       { name: "NontonGo", url: `https://www.nontongo.win/embed/movie/${m.tmdbId}`, sandbox: defaultSandbox },
-      { name: "MoviesApi", url: `https://moviesapi.club/embed/movie/${m.tmdbId}`, sandbox: defaultSandbox },
+      
       { name: "SmashyStream", url: `https://player.smashy.stream/movie/${m.tmdbId}`, sandbox: defaultSandbox },
       { name: "AutoEmbed", url: `https://player.autoembed.cc/embed/movie/${m.tmdbId}`, sandbox: defaultSandbox },
       { name: "VidSrc.net", url: `https://vidsrc.net/embed/movie/${m.tmdbId}`, sandbox: defaultSandbox },

@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
     { name: "VidLink Pro", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}` },
     { name: "2Embed", url: `https://www.2embed.cc/embedtv/${tmdbId}&s=${season}&e=${episode}` },
     { name: "NontonGo", url: `https://www.nontongo.win/embed/tv/${tmdbId}/${season}/${episode}` },
-    { name: "MoviesApi", url: `https://moviesapi.club/embed/tv/${tmdbId}/${season}/${episode}` },
+    
     { name: "SmashyStream", url: `https://player.smashy.stream/tv/${tmdbId}/${season}/${episode}` },
     { name: "AutoEmbed", url: `https://player.autoembed.cc/embed/tv/${tmdbId}/${season}/${episode}` },
     { name: "VidSrc.net", url: `https://vidsrc.net/embed/tv/${tmdbId}/${season}/${episode}` },
@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
     { name: "VidLink Pro", url: `https://vidlink.pro/movie/${tmdbId}` },
     { name: "2Embed", url: `https://www.2embed.cc/embed/${tmdbId}` },
     { name: "NontonGo", url: `https://www.nontongo.win/embed/movie/${tmdbId}` },
-    { name: "MoviesApi", url: `https://moviesapi.club/embed/movie/${tmdbId}` },
+    
     { name: "SmashyStream", url: `https://player.smashy.stream/movie/${tmdbId}` },
     { name: "AutoEmbed", url: `https://player.autoembed.cc/embed/movie/${tmdbId}` },
     { name: "VidSrc.net", url: `https://vidsrc.net/embed/movie/${tmdbId}` },
