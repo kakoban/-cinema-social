@@ -11,7 +11,7 @@ interface ServerCheckResult {
 }
 
 // Deep server-side content verification helper
-async function checkServerHealth(name: string, url: string, timeoutMs = 3000): Promise<ServerCheckResult> {
+async function checkServerHealth(name: string, url: string, timeoutMs = 2000): Promise<ServerCheckResult> {
   const start = Date.now();
   try {
     const controller = new AbortController();
@@ -86,23 +86,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing required parameter 'tmdbId'" }, { status: 400 });
   }
 
-  // Define candidate mirrors according to configured streaming servers
+  // Define candidate mirrors — only include live-tested servers
   const candidateServers = type === "tv" ? [
-    { name: "AutoEmbed", url: `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}` },
-    { name: "VidSrc.in", url: `https://vidsrc.in/embed/tv/${tmdbId}/${season}/${episode}` },
     { name: "VidLink Pro", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}` },
-    { name: "VidSrc.cc", url: `https://vidsrc.cc/v2/embed/tv/${tmdbId}/${season}/${episode}` },
     { name: "2Embed", url: `https://www.2embed.cc/embedtv/${tmdbId}&s=${season}&e=${episode}` },
-    { name: "VidSrc.icu", url: `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}` },
-    { name: "VidBinge", url: `https://vidbinge.dev/embed/tv/${tmdbId}/${season}/${episode}` },
+    { name: "NontonGo", url: `https://www.nontongo.win/embed/tv/${tmdbId}/${season}/${episode}` },
+    { name: "MoviesApi", url: `https://moviesapi.club/embed/tv/${tmdbId}/${season}/${episode}` },
+    { name: "SmashyStream", url: `https://player.smashy.stream/tv/${tmdbId}/${season}/${episode}` },
+    { name: "AutoEmbed", url: `https://player.autoembed.cc/embed/tv/${tmdbId}/${season}/${episode}` },
+    { name: "VidSrc.net", url: `https://vidsrc.net/embed/tv/${tmdbId}/${season}/${episode}` },
+    { name: "MultiEmbed", url: `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}` },
   ] : [
-    { name: "AutoEmbed", url: `https://autoembed.co/movie/tmdb/${tmdbId}` },
-    { name: "VidSrc.in", url: `https://vidsrc.in/embed/movie/${tmdbId}` },
     { name: "VidLink Pro", url: `https://vidlink.pro/movie/${tmdbId}` },
-    { name: "VidSrc.cc", url: `https://vidsrc.cc/v2/embed/movie/${tmdbId}` },
     { name: "2Embed", url: `https://www.2embed.cc/embed/${tmdbId}` },
-    { name: "VidSrc.icu", url: `https://vidsrc.icu/embed/movie/${tmdbId}` },
-    { name: "VidBinge", url: `https://vidbinge.dev/embed/movie/${tmdbId}` },
+    { name: "NontonGo", url: `https://www.nontongo.win/embed/movie/${tmdbId}` },
+    { name: "MoviesApi", url: `https://moviesapi.club/embed/movie/${tmdbId}` },
+    { name: "SmashyStream", url: `https://player.smashy.stream/movie/${tmdbId}` },
+    { name: "AutoEmbed", url: `https://player.autoembed.cc/embed/movie/${tmdbId}` },
+    { name: "VidSrc.net", url: `https://vidsrc.net/embed/movie/${tmdbId}` },
+    { name: "MultiEmbed", url: `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1` },
   ];
 
   // 1. Run parallel server deep health checks
@@ -131,11 +133,13 @@ export async function GET(req: NextRequest) {
 Verified Inspection Results: ${JSON.stringify(healthResults)}.
 
 Server Context:
-- BlackVid: Excellent quality. Very reliable stream provider, fast and modern. Prioritize this if it's 'online' (also known as VidBinge).
-- AutoEmbed / MultiEmbed: Good secondary choices, often have subtitles.
-- VidLink / VidSrc: Very fast, but often lack internal Persian subtitles.
+- VidLink Pro: Very fast, reliable. Best default choice.
+- 2Embed: Stable, often has subtitles.
+- NontonGo: Good alternative, reliable.
+- MoviesApi / AutoEmbed / SmashyStream: Variable reliability.
+- MultiEmbed / VidSrc.net: Fallback options.
 
-Task: Pick the single BEST verified working server index from the provided results (prefer verifiedPlayable: true and lower latencyMs, but prioritize BlackVid if healthy). Provide a short 1-sentence Persian explanation.
+Task: Pick the single BEST verified working server index from the provided results (prefer verifiedPlayable: true and lower latencyMs). Provide a short 1-sentence Persian explanation.
 Return STRICT JSON:
 {
   "recommendedServerIndex": 0,

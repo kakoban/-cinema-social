@@ -197,7 +197,7 @@ export function Header() {
                   <Menu className="size-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="start" className="w-72 p-0">
+              <SheetContent side="left" className="w-72 p-0">
                 <div className="flex items-center gap-2 p-4 border-b border-border">
                   <div className="size-8 rounded-lg bg-red-600 flex items-center justify-center text-white">
                     <Film className="size-4" />

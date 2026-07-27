@@ -1,4 +1,3 @@
-import toWebVTT from "srt-webvtt";
 import { Player } from "./Player";
 
 export class HTMLPlayer implements Player {
@@ -123,7 +122,8 @@ export class HTMLPlayer implements Player {
       el.src = "";
       el.srcObject = null;
       this.setSubtitleMode("hidden");
-      el.innerHTML = "";
+      const tracks = el.querySelectorAll("track");
+      tracks.forEach((t) => t.remove());
     }
   };
 
@@ -131,19 +131,23 @@ export class HTMLPlayer implements Player {
     const el = this.getVideoEl();
     if (!el) return;
 
-    el.innerHTML = "";
+    // Remove existing track elements
+    const existingTracks = el.querySelectorAll("track");
+    existingTracks.forEach((t) => t.remove());
+
     if (src) {
       try {
-        const response = await fetch(src);
-        const buffer = await response.arrayBuffer();
-        const url = await toWebVTT(new Blob([buffer]));
         const track = document.createElement("track");
-        track.kind = "captions";
-        track.label = "English";
-        track.srclang = "en";
-        track.src = url;
+        track.kind = "subtitles";
+        track.label = "فارسی";
+        track.srclang = "fa";
+        track.src = src;
+        track.default = true;
         el.appendChild(track);
-        el.textTracks[0].mode = "showing";
+
+        if (el.textTracks && el.textTracks.length > 0) {
+          el.textTracks[0].mode = "showing";
+        }
       } catch (e) {
         console.error("Failed to load subtitles:", e);
       }

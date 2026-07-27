@@ -58,7 +58,9 @@ export function NotificationBell() {
 
   useEffect(() => {
     if (!user) return;
-    const sock = io("/?XTransformPort=3003", {
+    const targetSocketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:3003" : "/?XTransformPort=3003");
+    const sock = io(targetSocketUrl, {
+      path: "/",
       transports: ["websocket", "polling"],
       reconnection: true,
     });

@@ -231,6 +231,15 @@ export function RoomView({ id }: { id: string }) {
         toast.info("شما در حال حاضر داخل اتاق واچ پارتی سینما هستید!");
         return null;
       }
+      // Block ad popups from embed servers (allow only same-site URLs)
+      const currentHost = window.location.hostname;
+      try {
+        const popupHost = new URL(url?.toString() || "", window.location.href).hostname;
+        if (popupHost !== currentHost) {
+          console.log("[Ad Blocker] Blocked popup:", urlStr.substring(0, 80));
+          return null;
+        }
+      } catch { return null; }
       return originalOpen.apply(this, arguments as any);
     };
 
@@ -881,14 +890,18 @@ export function RoomView({ id }: { id: string }) {
 
   const r = room.data;
 
+  const defaultSandbox = "allow-same-origin allow-scripts allow-presentation allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-top-navigation-by-user-activation allow-downloads";
+
   const roomTmdbServers: ServerConfig[] = r?.movie?.tmdbId ? [
-    { name: "Server 1 (AutoEmbed)", url: `https://player.autoembed.cc/embed/movie/${r.movie.tmdbId}` },
-    { name: "Server 2 (VidSrc.in)", url: `https://vidsrc.in/embed/movie/${r.movie.tmdbId}` },
-    { name: "Server 3 (VidLink Pro)", url: `https://vidlink.pro/movie/${r.movie.tmdbId}` },
-    { name: "Server 4 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${r.movie.tmdbId}` },
-    { name: "Server 5 (2Embed)", url: `https://www.2embed.cc/embed/${r.movie.tmdbId}` },
-    { name: "Server 6 (VidSrc.icu)", url: `https://vidsrc.icu/embed/movie/${r.movie.tmdbId}` },
-    { name: "Server 7 (VidBinge)", url: `https://vidbinge.dev/embed/movie/${r.movie.tmdbId}`, sandbox: true }
+    // ✅ Live-tested working servers (sorted by reliability)
+    { name: "VidLink Pro", url: `https://vidlink.pro/movie/${r.movie.tmdbId}`, sandbox: false },
+    { name: "2Embed", url: `https://www.2embed.cc/embed/${r.movie.tmdbId}`, sandbox: defaultSandbox },
+    { name: "NontonGo", url: `https://www.nontongo.win/embed/movie/${r.movie.tmdbId}`, sandbox: defaultSandbox },
+    { name: "MoviesApi", url: `https://moviesapi.club/embed/movie/${r.movie.tmdbId}`, sandbox: defaultSandbox },
+    { name: "SmashyStream", url: `https://player.smashy.stream/movie/${r.movie.tmdbId}`, sandbox: defaultSandbox },
+    { name: "AutoEmbed", url: `https://player.autoembed.cc/embed/movie/${r.movie.tmdbId}`, sandbox: defaultSandbox },
+    { name: "VidSrc.net", url: `https://vidsrc.net/embed/movie/${r.movie.tmdbId}`, sandbox: defaultSandbox },
+    { name: "MultiEmbed", url: `https://multiembed.mov/directstream.php?video_id=${r.movie.tmdbId}&tmdb=1`, sandbox: defaultSandbox }
   ] : [];
 
   // Use local file if available, otherwise use active mirror or room movie URL
@@ -1282,7 +1295,15 @@ export function RoomView({ id }: { id: string }) {
                     className="size-full absolute inset-0 border-0"
                     allowFullScreen={true}
                     allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; accelerometer *; gyroscope *"
-                    sandbox={activeRoomServer?.sandbox ? "allow-same-origin allow-scripts allow-presentation allow-forms" : undefined}
+                    sandbox={
+                      activeRoomServer?.sandbox === false
+                        ? undefined
+                        : typeof activeRoomServer?.sandbox === "string"
+                        ? activeRoomServer.sandbox
+                        : activeRoomServer?.sandbox === true
+                        ? "allow-same-origin allow-scripts allow-presentation allow-forms allow-popups allow-popups-to-escape-sandbox"
+                        : undefined
+                    }
                     referrerPolicy="no-referrer"
                   />
                   <SubtitleOverlay vttUrl={subtitleUrl} />

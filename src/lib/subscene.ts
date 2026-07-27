@@ -1,300 +1,168 @@
-// Subscene Scraper — Free subtitle source with rich Persian/Farsi content
-// Note: Subscene doesn't have an official API, so we scrape their website.
+import unzipper from 'unzipper';
+import iconv from 'iconv-lite';
+import { Buffer } from 'buffer';
 
 const SUBSCENE_BASE = "https://subscene.com";
 
-export interface SubsceneResult {
+export interface SubtitleResult {
   id: string;
   title: string;
   language: string;
-  languageCode: string;
   url: string;
-  downloadUrl: string;
-  hearingImpaired?: boolean;
 }
 
-export interface SubsceneSubtitle {
-  id: string;
-  title: string;
-  language: string;
-  languageCode: string;
-  url: string;
-  downloadUrl: string;
-  hearingImpaired: boolean;
-  comment?: string;
-}
-
-/**
- * Search for subtitles on Subscene
- * @param query - Movie/TV show title
- * @param languages - Array of language codes (default: ['fa', 'en'])
- * @returns Array of subtitle results
- */
-export async function subsceneSearch(
-  query: string,
-  languages: string[] = ["fa", "en"]
-): Promise<SubsceneResult[]> {
+export async function searchSubscene(query: string, lang = 'fa'): Promise<SubtitleResult[]> {
   try {
-    // Subscene search URL pattern
-    const searchUrl = `${SUBSCENE_BASE}/subtitles/searchbytitle`;
-    
-    const formData = new URLSearchParams();
-    formData.append("query", query);
-    formData.append("l", "");
-
-    const response = await fetch(searchUrl, {
-      method: "POST",
+    const res = await fetch(`${SUBSCENE_BASE}/subtitles/searchbytitle`, {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+        'Content-Type': 'application/x-www-form-urlencoded',
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
-      body: formData.toString(),
-      next: { revalidate: 300 }, // Cache for 5 minutes
+      body: `query=${encodeURIComponent(query)}&l=${lang}`,
     });
 
-    if (!response.ok) {
-      console.error("Subscene search failed:", response.status);
-      return [];
+    if (!res.ok) {
+      throw new Error(`Failed to fetch from Subscene: ${res.status}`);
     }
 
-    const html = await response.text();
-    return parseSearchResults(html, languages);
-  } catch (error) {
-    console.error("Subscene search error:", error);
-    return [];
-  }
-}
+    const html = await res.text();
 
-/**
- * Parse search results from Subscene HTML
- */
-function parseSearchResults(html: string, targetLanguages: string[]): SubsceneResult[] {
-  const results: SubsceneResult[] = [];
-  
-  // Match subtitle links in the search results
-  // Pattern: /subtitles/[title-slug]/[language]/[id]
-  const linkPattern = /<a\s+href="\/subtitles\/([^"]+)">\s*<span class="([^"]*)">\s*([^<]+)\s*<\/span>\s*<span>\s*([^<]+)\s*<\/span>\s*<\/a>/gi;
-  
-  let match;
-  while ((match = linkPattern.exec(html)) !== null) {
-    const [, path, langClass, language, title] = match;
-    
-    // Extract language code from class or text
-    const languageCode = extractLanguageCode(langClass, language.trim());
-    
-    // Filter by target languages
-    if (targetLanguages.length > 0 && !targetLanguages.includes(languageCode)) {
-      continue;
-    }
+    // Parse results
+    const results: SubtitleResult[] = [];
+    const regex = /<a href="(\/subtitles\/[^"]+)"[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>/g;
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+      const path = match[1];
+      const title = match[2].trim();
 
-    // Check if hearing impaired
-    const hearingImpaired = html.includes(`${path}`) && 
-      html.includes('class="hi"');
-
-    results.push({
-      id: path,
-      title: title.trim(),
-      language: language.trim(),
-      languageCode,
-      url: `${SUBSCENE_BASE}/subtitles/${path}`,
-      downloadUrl: `${SUBSCENE_BASE}/subtitles/${path}/download`,
-      hearingImpaired,
-    });
-  }
-
-  // Alternative parsing if the first pattern doesn't match
-  if (results.length === 0) {
-    const altPattern = /<a\s+href="(\/subtitles\/[^"]+)"[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>[\s\S]*?<\/a>/gi;
-    
-    while ((match = altPattern.exec(html)) !== null) {
-      const [, path, title] = match;
-      
-      // Try to extract language from the path
-      const langMatch = path.match(/\/subtitles\/[^\/]+\/([^\/]+)\//);
-      const language = langMatch ? langMatch[1] : "unknown";
-      const languageCode = language.substring(0, 2).toLowerCase();
-
-      // Filter by target languages
-      if (targetLanguages.length > 0 && !targetLanguages.includes(languageCode)) {
-        continue;
+      // Basic filtering: we only want Persian if searching for Persian
+      if (lang === 'fa' && !html.includes('fa-fa') && !title.toLowerCase().includes('farsi') && !title.toLowerCase().includes('persian')) {
+          // It's hard to accurately parse the language span without DOM parser,
+          // but we capture whatever matches.
       }
 
       results.push({
         id: path,
-        title: title.trim(),
-        language: language,
-        languageCode,
+        title: title,
         url: `${SUBSCENE_BASE}${path}`,
-        downloadUrl: `${SUBSCENE_BASE}${path}/download`,
-        hearingImpaired: false,
+        language: lang,
       });
     }
-  }
-
-  return results;
-}
-
-/**
- * Extract language code from CSS class or language name
- */
-function extractLanguageCode(className: string, languageName: string): string {
-  // Common language class patterns on Subscene
-  const classMap: Record<string, string> = {
-    "persian": "fa",
-    "farsi": "fa",
-    "english": "en",
-    "arabic": "ar",
-    "spanish": "es",
-    "french": "fr",
-    "german": "de",
-    "italian": "it",
-    "portuguese": "pt",
-    "turkish": "tr",
-    "russian": "ru",
-    "chinese": "zh",
-    "japanese": "ja",
-    "korean": "ko",
-    "hindi": "hi",
-  };
-
-  // Check class name
-  const lowerClass = className.toLowerCase();
-  for (const [key, code] of Object.entries(classMap)) {
-    if (lowerClass.includes(key)) {
-      return code;
-    }
-  }
-
-  // Check language name
-  const lowerName = languageName.toLowerCase();
-  for (const [key, code] of Object.entries(classMap)) {
-    if (lowerName.includes(key)) {
-      return code;
-    }
-  }
-
-  // Default to first two chars
-  return languageName.substring(0, 2).toLowerCase();
-}
-
-/**
- * Get subtitle download URL from a subtitle page
- * @param subtitlePath - The subtitle path from search results
- * @returns Direct download URL
- */
-export async function getSubsceneDownloadUrl(subtitlePath: string): Promise<string | null> {
-  try {
-    const url = subtitlePath.startsWith("http") 
-      ? subtitlePath 
-      : `${SUBSCENE_BASE}${subtitlePath}`;
-
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
-      next: { revalidate: 300 },
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const html = await response.text();
-
-    // Look for download link
-    const downloadMatch = html.match(/href="(\/subtitles\/[^"]+\/download)"/i);
-    if (downloadMatch) {
-      return `${SUBSCENE_BASE}${downloadMatch[1]}`;
-    }
-
-    // Alternative: direct download link
-    const directMatch = html.match(/href="([^"]*download[^"]*\.srt)"/i);
-    if (directMatch) {
-      return directMatch[1].startsWith("http") 
-        ? directMatch[1] 
-        : `${SUBSCENE_BASE}${directMatch[1]}`;
-    }
-
-    return null;
+    return results;
   } catch (error) {
-    console.error("Get download URL error:", error);
-    return null;
+    console.error("Subscene search error:", error);
+    // Return mock data for testing if real subscene is blocked
+    if (process.env.NODE_ENV === 'development') {
+      return [
+        { id: '/mock/1', title: `[MOCK] ${query} - Bluray 1080p - Persian`, language: 'fa', url: '/mock/1' },
+        { id: '/mock/2', title: `[MOCK] ${query} - WebDL - Persian`, language: 'fa', url: '/mock/2' }
+      ];
+    }
+    throw error;
   }
 }
 
-/**
- * Download subtitle content from Subscene
- * @param downloadUrl - The download URL
- * @returns SRT content as string
- */
-export async function downloadSubsceneSubtitle(downloadUrl: string): Promise<string | null> {
-  try {
-    const url = downloadUrl.startsWith("http") 
-      ? downloadUrl 
-      : `${SUBSCENE_BASE}${downloadUrl}`;
-
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "*/*",
-      },
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    // Subscene downloads are usually ZIP files
-    const contentType = response.headers.get("content-type") || "";
-    
-    if (contentType.includes("zip") || contentType.includes("octet-stream")) {
-      // For ZIP files, we'd need a ZIP parser
-      // For now, return null and handle in the API
-      return null;
-    }
-
-    // If it's plain text (SRT)
-    return await response.text();
-  } catch (error) {
-    console.error("Download subtitle error:", error);
-    return null;
+export async function downloadSubsceneSrt(subtitleUrl: string): Promise<string> {
+  // If it's a mock URL, return mock SRT
+  if (subtitleUrl.startsWith('/mock/')) {
+    return `1\n00:00:01,000 --> 00:00:05,000\n[Mock Subtitle] This is a test subtitle.\n\n2\n00:00:06,000 --> 00:00:10,000\nسلااااام! این یک زیرنویس تستی فارسی است.`;
   }
+
+  // First we need the actual download URL from the specific subtitle page
+  const pageRes = await fetch(subtitleUrl, {
+    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+  });
+
+  if (!pageRes.ok) throw new Error("Failed to load subtitle page");
+  const pageHtml = await pageRes.text();
+
+  const downloadMatch = pageHtml.match(/href="(\/subtitles\/[^"]+\/download)"/i);
+  if (!downloadMatch) throw new Error("Could not find download link on page");
+
+  const downloadUrl = `${SUBSCENE_BASE}${downloadMatch[1]}`;
+
+  // Download the file
+  const res = await fetch(downloadUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+  });
+
+  if (!res.ok) throw new Error(`Failed to download subtitle file: ${res.status}`);
+
+  const buffer = await res.arrayBuffer();
+
+  // Check if it's a ZIP
+  const contentType = res.headers.get('content-type') || '';
+  const contentDisposition = res.headers.get('content-disposition') || '';
+
+  if (contentType.includes('zip') || contentType.includes('octet-stream') || contentDisposition.includes('.zip')) {
+    // Extract SRT from ZIP
+    try {
+      const directory = await unzipper.Open.buffer(Buffer.from(buffer));
+
+      // Find the first .srt file
+      const srtFile = directory.files.find(d => d.path.toLowerCase().endsWith('.srt'));
+      if (!srtFile) {
+        throw new Error('No .srt file found in the downloaded ZIP');
+      }
+
+      const srtBuffer = await srtFile.buffer();
+      return decodeSubtitleBuffer(srtBuffer);
+    } catch (e) {
+      console.error("ZIP extraction failed:", e);
+      throw new Error("Failed to extract subtitle from ZIP");
+    }
+  }
+
+  // If it's not a ZIP, just decode the buffer directly
+  return decodeSubtitleBuffer(Buffer.from(buffer));
 }
 
 /**
- * Convert SRT to WebVTT format
+ * Decodes a subtitle buffer, fixing Windows-1256 encoding for Persian if needed
  */
+function decodeSubtitleBuffer(buffer: Buffer): string {
+  // First try to decode as UTF-8
+  const utf8Str = buffer.toString('utf8');
+
+  // A simple heuristic for Persian Windows-1256 detection:
+  // If UTF-8 parsing results in a lot of replacement characters ()
+  // or completely weird ASCII symbols where Persian letters should be.
+  // Actually, standard iconv-lite decode is safer if we know it's Persian,
+  // but let's check if it contains common Persian words in UTF-8.
+
+  // If it contains , it's almost certainly not valid UTF-8.
+  if (utf8Str.includes('')) {
+    return iconv.decode(buffer, 'win1256');
+  }
+
+  // Another heuristic: Arabic/Persian Windows-1256 uses characters in the range 0xC0-0xFF.
+  // If we decode it as win1256 and it contains valid Persian chars, and utf8 doesn't, we switch.
+  const win1256Str = iconv.decode(buffer, 'win1256');
+
+  // Check for common Persian letters in the win1256 decoded string that wouldn't appear correctly in utf8 if it was win1256
+  const persianChars = /[؀-ۿ]/;
+  const hasPersianUtf8 = persianChars.test(utf8Str);
+  const hasPersianWin1256 = persianChars.test(win1256Str);
+
+  // If decoding as win1256 yields Persian characters but UTF-8 doesn't, it's win1256
+  if (hasPersianWin1256 && !hasPersianUtf8) {
+      return win1256Str;
+  }
+
+  // Default to UTF-8
+  return utf8Str;
+}
+
 export function srtToVtt(srt: string): string {
   let vtt = "WEBVTT\n\n";
   vtt += srt
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
-    .replace(/^(\d+)\n(\d{2}:\d{2}:\d{2}),(\d{3}) --> (\d{2}:\d{2}:\d{2}),(\d{3})/gm, "$1\n$2.$3 --> $4.$5")
+    // Fix timestamps (SRT uses comma, VTT uses dot)
+    .replace(/^(\d{2}:\d{2}:\d{2}),(\d{3})/gm, "$1.$2")
+    // Handle SRT formatting tags if necessary, but VTT supports basic <b> <i> etc.
     .replace(/<br>/gi, "\n");
-  return vtt;
-}
 
-/**
- * Get language name from code
- */
-export function getLanguageName(code: string): string {
-  const names: Record<string, string> = {
-    fa: "Persian",
-    en: "English",
-    ar: "Arabic",
-    es: "Spanish",
-    fr: "French",
-    de: "German",
-    it: "Italian",
-    pt: "Portuguese",
-    tr: "Turkish",
-    ru: "Russian",
-    zh: "Chinese",
-    ja: "Japanese",
-    ko: "Korean",
-    hi: "Hindi",
-  };
-  return names[code] || code.toUpperCase();
+  return vtt;
 }

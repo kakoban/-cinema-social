@@ -64,7 +64,7 @@ export function RoomsView() {
     }
     setIsSearching(true);
     try {
-      const res = await api.get<{ data: { results: any[] } }>(`/api/movies/search?q=${encodeURIComponent(q)}`);
+      const res = await api.get<{ results: any[] }>(`/api/movies/search?q=${encodeURIComponent(q)}`);
       setSearchResults(res.data?.results || []);
     } catch {
       /* ignore */
@@ -77,7 +77,7 @@ export function RoomsView() {
     try {
       let targetId = m.id;
       if (!targetId && m.tmdbId) {
-        const mRes = await api.get<{ data: any }>(`/api/movies/${m.tmdbId}`);
+        const mRes = await api.get<{ id: string }>(`/api/movies/${m.tmdbId}`);
         targetId = mRes.data?.id;
       }
       if (targetId) {
@@ -92,7 +92,10 @@ export function RoomsView() {
 
   const rooms = useQuery<Room[]>({
     queryKey: ["rooms"],
-    queryFn: () => api.get<Room[]>("/api/rooms").then((r) => r.data!),
+    queryFn: async () => {
+      const res = await api.get<Room[]>("/api/rooms");
+      return (res.data as Room[]) || [];
+    },
     refetchInterval: 15_000,
   });
 

@@ -46,26 +46,37 @@ export function MessagesView({ targetUsername }: { targetUsername?: string }) {
 
   const conversations = useQuery<Conversation[]>({
     queryKey: ["conversations"],
-    queryFn: () => api.get<Conversation[]>("/api/messages/conversations").then((r) => r.data!),
+    queryFn: async () => {
+      const res = await api.get<Conversation[]>("/api/messages/conversations");
+      return (res.data as Conversation[]) || [];
+    },
     enabled: !!user,
   });
 
   const activeTarget = useQuery<{ id: string; username: string; avatar: string | null }>({
     queryKey: ["user", targetUsername],
-    queryFn: () => api.get(`/api/users/${targetUsername}`).then((r) => r.data!),
+    queryFn: async () => {
+      const res = await api.get<{ id: string; username: string; avatar: string | null }>(`/api/users/${targetUsername}`);
+      return res.data as { id: string; username: string; avatar: string | null };
+    },
     enabled: !!targetUsername,
   });
 
   const messages = useQuery<DirectMessage[]>({
     queryKey: ["messages", activeTarget.data?.id],
-    queryFn: () => api.get<DirectMessage[]>(`/api/messages/${activeTarget.data!.id}`).then((r) => r.data!),
+    queryFn: async () => {
+      const res = await api.get<DirectMessage[]>(`/api/messages/${activeTarget.data!.id}`);
+      return (res.data as DirectMessage[]) || [];
+    },
     enabled: !!activeTarget.data?.id,
   });
 
   // Socket connection for real-time DMs
   useEffect(() => {
     if (!user) return;
-    const sock = io("/?XTransformPort=3003", {
+    const targetSocketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:3003" : "/?XTransformPort=3003");
+    const sock = io(targetSocketUrl, {
+      path: "/",
       transports: ["websocket", "polling"],
       reconnection: true,
     });

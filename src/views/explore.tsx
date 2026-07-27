@@ -41,8 +41,12 @@ export function ExploreView({ query, source }: { query?: string; source?: string
 
   const { data, isLoading } = useQuery<{ results: SearchMovie[] }>({
     queryKey: ["search", activeSource, submitted],
-    queryFn: () =>
-      api.get(`/api/movies/search?q=${encodeURIComponent(submitted)}&source=${activeSource}`).then((r) => r.data!),
+    queryFn: async () => {
+      const res = await api.get<{ results: SearchMovie[] }>(
+        `/api/movies/search?q=${encodeURIComponent(submitted)}&source=${activeSource}`
+      );
+      return (res.data as { results: SearchMovie[] }) || { results: [] };
+    },
     enabled: !!submitted,
   });
 

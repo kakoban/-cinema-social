@@ -57,7 +57,7 @@ import { AiLoadingOverlay } from "@/components/cinema/ai-loading-overlay";
 export interface ServerConfig {
   name: string;
   url: string;
-  sandbox?: boolean;
+  sandbox?: boolean | string;
 }
 
 interface MovieDetail {
@@ -265,10 +265,11 @@ export function MovieView({ id }: { id: string }) {
       }
     };
 
-    // 2. Override window.open to catch popup links from SmashyStream
+    // 2. Override window.open to catch popup links from embed servers
     const originalOpen = window.open;
     window.open = function (url?: string | URL, target?: string, features?: string) {
       const urlStr = url ? url.toString().toLowerCase() : "";
+      // Handle SmashyStream actions → route to our site
       if (
         urlStr.includes("watchparty") || 
         urlStr.includes("watch_party") || 
@@ -283,6 +284,15 @@ export function MovieView({ id }: { id: string }) {
         handleBookmarkAction();
         return null;
       }
+      // Block ad popups from embed servers (allow only same-site URLs)
+      const currentHost = window.location.hostname;
+      try {
+        const popupHost = new URL(url?.toString() || "", window.location.href).hostname;
+        if (popupHost !== currentHost) {
+          console.log("[Ad Blocker] Blocked popup:", urlStr.substring(0, 80));
+          return null;
+        }
+      } catch { /* invalid URL, block it */ return null; }
       return originalOpen.apply(this, arguments as any);
     };
 
@@ -305,7 +315,12 @@ export function MovieView({ id }: { id: string }) {
       const tmdb = movie.data.tmdbId || movie.data.id;
       const imdb = (movie.data as any).imdbId || "";
       const title = movie.data.title;
-      const res = await fetch(`/api/movies/ai-server-finder?tmdbId=${tmdb}&imdbId=${imdb}&title=${encodeURIComponent(title)}`);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch(`/api/movies/ai-server-finder?tmdbId=${tmdb}&imdbId=${imdb}&title=${encodeURIComponent(title)}`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
       if (res.ok) {
         const data = await res.json();
         if (data.aiRecommendation) {
@@ -320,9 +335,16 @@ export function MovieView({ id }: { id: string }) {
             setActiveServerIdx(data.recommendedIndex);
           }
         }
+      } else {
+        toast.error("AI Server Finder موقتاً در دسترس نیست. از دکمه Next Server استفاده کنید.");
       }
-    } catch (err) {
-      console.error("AI Server Finder error:", err);
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        toast.error("جستجوی هوشمند سرور timeout شد. سرور بعدی رو امتحان کنید.");
+      } else {
+        console.error("AI Server Finder error:", err);
+        toast.error("خطا در جستجوی هوشمند سرور. از دکمه Next Server استفاده کنید.");
+      }
     } finally {
       setAiLoading(false);
     }
@@ -457,15 +479,19 @@ export function MovieView({ id }: { id: string }) {
 
   const allServers: ServerConfig[] = [];
 
+  const defaultSandbox = "allow-same-origin allow-scripts allow-presentation allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-top-navigation-by-user-activation allow-downloads";
+
   if (m.tmdbId) {
     allServers.push(
-      { name: "Server 1 (AutoEmbed)", url: `https://player.autoembed.cc/embed/movie/${m.tmdbId}` },
-      { name: "Server 2 (VidSrc.in)", url: `https://vidsrc.in/embed/movie/${m.tmdbId}` },
-      { name: "Server 3 (VidLink Pro)", url: `https://vidlink.pro/movie/${m.tmdbId}` },
-      { name: "Server 4 (VidSrc.cc)", url: `https://vidsrc.cc/v2/embed/movie/${m.tmdbId}` },
-      { name: "Server 5 (2Embed)", url: `https://www.2embed.cc/embed/${m.tmdbId}` },
-      { name: "Server 6 (VidSrc.icu)", url: `https://vidsrc.icu/embed/movie/${m.tmdbId}` },
-      { name: "Server 7 (VidBinge)", url: `https://vidbinge.dev/embed/movie/${m.tmdbId}`, sandbox: true }
+      // ✅ Live-tested working servers (sorted by reliability)
+      { name: "VidLink Pro", url: `https://vidlink.pro/movie/${m.tmdbId}`, sandbox: false },
+      { name: "2Embed", url: `https://www.2embed.cc/embed/${m.tmdbId}`, sandbox: defaultSandbox },
+      { name: "NontonGo", url: `https://www.nontongo.win/embed/movie/${m.tmdbId}`, sandbox: defaultSandbox },
+      { name: "MoviesApi", url: `https://moviesapi.club/embed/movie/${m.tmdbId}`, sandbox: defaultSandbox },
+      { name: "SmashyStream", url: `https://player.smashy.stream/movie/${m.tmdbId}`, sandbox: defaultSandbox },
+      { name: "AutoEmbed", url: `https://player.autoembed.cc/embed/movie/${m.tmdbId}`, sandbox: defaultSandbox },
+      { name: "VidSrc.net", url: `https://vidsrc.net/embed/movie/${m.tmdbId}`, sandbox: defaultSandbox },
+      { name: "MultiEmbed", url: `https://multiembed.mov/directstream.php?video_id=${m.tmdbId}&tmdb=1`, sandbox: defaultSandbox }
     );
   }
 
@@ -640,7 +666,15 @@ export function MovieView({ id }: { id: string }) {
                           className="size-full absolute inset-0 border-0"
                           allowFullScreen={true}
                           allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; accelerometer *; gyroscope *"
-                          sandbox={activeServer?.sandbox ? "allow-same-origin allow-scripts allow-presentation allow-forms" : undefined}
+                          sandbox={
+                            activeServer?.sandbox === false
+                              ? undefined
+                              : typeof activeServer?.sandbox === "string"
+                              ? activeServer.sandbox
+                              : activeServer?.sandbox === true
+                              ? "allow-same-origin allow-scripts allow-presentation allow-forms allow-popups allow-popups-to-escape-sandbox"
+                              : undefined
+                          }
                           referrerPolicy="no-referrer"
                         />
                         <SubtitleOverlay vttUrl={subtitleTrackUrl} />

@@ -143,6 +143,7 @@ export async function getCurrentUser(): Promise<{
   email: string;
   role: string;
   avatar: string | null;
+  bio: string | null;
   language: string;
   theme: string;
   banned: boolean;
@@ -173,6 +174,7 @@ export async function getUserFromAuthHeader(
   email: string;
   role: string;
   avatar: string | null;
+  bio: string | null;
   language: string;
   theme: string;
   banned: boolean;

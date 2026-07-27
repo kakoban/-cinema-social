@@ -51,23 +51,35 @@ export function HomeView() {
 
   const trending = useQuery<{ results: TrendingMovie[]; configured: boolean }>({
     queryKey: ["trending"],
-    queryFn: () => api.get("/api/movies/trending").then((r) => r.data!),
+    queryFn: async () => {
+      const res = await api.get<{ results: TrendingMovie[]; configured: boolean }>("/api/movies/trending");
+      return (res.data as { results: TrendingMovie[]; configured: boolean }) || { results: [], configured: false };
+    },
   });
 
   const archive = useQuery<FeaturedMovie[]>({
     queryKey: ["featured"],
-    queryFn: () => api.get<FeaturedMovie[]>("/api/movies/featured").then((r) => r.data!),
+    queryFn: async () => {
+      const res = await api.get<FeaturedMovie[]>("/api/movies/featured");
+      return (res.data as FeaturedMovie[]) || [];
+    },
   });
 
   const feed = useQuery<{ items: FeedItem[] }>({
     queryKey: ["feed"],
-    queryFn: () => api.get("/api/feed").then((r) => r.data!),
+    queryFn: async () => {
+      const res = await api.get<{ items: FeedItem[] }>("/api/feed");
+      return (res.data as { items: FeedItem[] }) || { items: [] };
+    },
     enabled: !!user,
   });
 
   const recommendations = useQuery<FeaturedMovie[]>({
     queryKey: ["recommendations"],
-    queryFn: () => api.get<FeaturedMovie[]>("/api/movies/recommendations").then((r) => r.data!),
+    queryFn: async () => {
+      const res = await api.get<FeaturedMovie[]>("/api/movies/recommendations");
+      return (res.data as FeaturedMovie[]) || [];
+    },
     enabled: !!user,
   });
 

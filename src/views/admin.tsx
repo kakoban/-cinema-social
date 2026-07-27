@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Shield, Ban, CheckCircle, Trash2, Search, Loader2, Users, Film, MessageSquare } from "lucide-react";
+import { Shield, Ban, CheckCircle, Trash2, Search, Loader2, Users, Film, MessageSquare, Bot, Sparkles, Save, Key, Cpu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { useNavigate } from "@/stores/router";
 import { useAuthStore } from "@/stores/auth-store";
@@ -65,25 +66,66 @@ export function AdminView() {
   const qc = useQueryClient();
   const [q, setQ] = useState("");
 
+  const isAdmin = me && (me.role === "ADMIN" || me.email === "nafa.1395@gmail.com");
+
   useEffect(() => {
-    if (me && me.role !== "ADMIN") navigate("/");
+    if (me && !isAdmin) navigate("/");
     if (!me) navigate("/login");
-  }, [me, navigate]);
+  }, [me, isAdmin, navigate]);
+
+  const aiSettings = useQuery<{ openRouterModel: string; openRouterApiKeyMasked: string; aiServerFinderEnabled: boolean }>({
+    queryKey: ["admin-ai-settings"],
+    queryFn: async () => {
+      const res = await api.get<{ openRouterModel: string; openRouterApiKeyMasked: string; aiServerFinderEnabled: boolean }>("/api/admin/settings");
+      return res.data || { openRouterModel: "google/gemini-2.5-flash-lite", openRouterApiKeyMasked: "", aiServerFinderEnabled: true };
+    },
+    enabled: !!isAdmin,
+  });
+
+  const [modelInput, setModelInput] = useState("google/gemini-2.5-flash-lite");
+  const [apiKeyInput, setApiKeyInput] = useState("");
+
+  useEffect(() => {
+    if (aiSettings.data?.openRouterModel) {
+      setModelInput(aiSettings.data.openRouterModel);
+    }
+  }, [aiSettings.data]);
+
+  const updateSettingsMutation = useMutation({
+    mutationFn: (data: { openRouterModel?: string; openRouterApiKey?: string; aiServerFinderEnabled?: boolean }) =>
+      api.put("/api/admin/settings", data),
+    onSuccess: () => {
+      toast.success("تنظیمات مدل هوش مصنوعی با موفقیت بروزرسانی شد! 🤖✨");
+      qc.invalidateQueries({ queryKey: ["admin-ai-settings"] });
+    },
+    onError: () => {
+      toast.error("خطا در بروزرسانی تنظیمات هوش مصنوعی");
+    },
+  });
 
   const users = useQuery<{ users: AdminUser[] }>({
     queryKey: ["admin-users", q],
-    queryFn: () => api.get(`/api/admin/users?q=${encodeURIComponent(q)}`).then((r) => r.data!),
-    enabled: !!me && me.role === "ADMIN",
+    queryFn: async () => {
+      const res = await api.get<{ users: AdminUser[] }>(`/api/admin/users?q=${encodeURIComponent(q)}`);
+      return (res.data as { users: AdminUser[] }) || { users: [] };
+    },
+    enabled: !!isAdmin,
   });
   const rooms = useQuery<AdminRoom[]>({
     queryKey: ["admin-rooms"],
-    queryFn: () => api.get("/api/admin/rooms").then((r) => r.data!),
-    enabled: !!me && me.role === "ADMIN",
+    queryFn: async () => {
+      const res = await api.get<AdminRoom[]>("/api/admin/rooms");
+      return (res.data as AdminRoom[]) || [];
+    },
+    enabled: !!isAdmin,
   });
   const reviews = useQuery<AdminReview[]>({
     queryKey: ["admin-reviews"],
-    queryFn: () => api.get("/api/admin/reviews").then((r) => r.data!),
-    enabled: !!me && me.role === "ADMIN",
+    queryFn: async () => {
+      const res = await api.get<AdminReview[]>("/api/admin/reviews");
+      return (res.data as AdminReview[]) || [];
+    },
+    enabled: !!isAdmin,
   });
 
   const banUser = useMutation({
@@ -115,7 +157,7 @@ export function AdminView() {
     },
   });
 
-  if (!me || me.role !== "ADMIN") return null;
+  if (!me || !isAdmin) return null;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -134,6 +176,9 @@ export function AdminView() {
           <TabsTrigger value="users"><Users className="size-4 me-1.5" />{t("admin.users")}</TabsTrigger>
           <TabsTrigger value="rooms"><Film className="size-4 me-1.5" />{t("admin.rooms")}</TabsTrigger>
           <TabsTrigger value="reviews"><MessageSquare className="size-4 me-1.5" />{t("admin.reviews")}</TabsTrigger>
+          <TabsTrigger value="ai" className="data-[state=active]:bg-purple-600 data-[state=active]:text-white">
+            <Bot className="size-4 me-1.5 text-purple-400" />تنظیمات هوش مصنوعی
+          </TabsTrigger>
         </TabsList>
 
         {/* Users */}
@@ -291,6 +336,104 @@ export function AdminView() {
             ) : (
               <p className="text-center text-sm text-muted-foreground py-8">{t("admin.noReviews")}</p>
             )}
+          </Card>
+        </TabsContent>
+
+        {/* AI Model Config Tab */}
+        <TabsContent value="ai">
+          <Card className="p-6 bg-zinc-900/90 border-purple-500/20 space-y-6">
+            <div className="flex items-center gap-3 border-b border-white/10 pb-4">
+              <div className="size-10 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                <Sparkles className="size-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white">مدیریت مدل هوش مصنوعی (OpenRouter AI)</h2>
+                <p className="text-xs text-muted-foreground">مدل و کلید API مورد استفاده برای سرویس هوشمند انتخاب سرورها را تغییر دهید</p>
+              </div>
+            </div>
+
+            {/* Model Presets */}
+            <div className="space-y-3">
+              <label className="text-sm font-semibold text-white flex items-center gap-2">
+                <Cpu className="size-4 text-purple-400" /> انتخاب مدل پیش‌فرض:
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                {[
+                  { name: "Gemini 2.5 Flash Lite", id: "google/gemini-2.5-flash-lite", badge: "پیشنهادی (بسیار سریع)" },
+                  { name: "Gemini 2.0 Flash Lite (Free)", id: "google/gemini-2.0-flash-lite:free", badge: "رایگان" },
+                  { name: "Gemini 2.5 Flash", id: "google/gemini-2.5-flash", badge: "متوازن" },
+                  { name: "Claude 3.5 Haiku", id: "anthropic/claude-3.5-haiku", badge: "پریمیوم Anthropic" },
+                  { name: "GPT-4o Mini", id: "openai/gpt-4o-mini", badge: "پریمیوم OpenAI" },
+                  { name: "Llama 3.3 70B", id: "meta-llama/llama-3.3-70b-instruct", badge: "متن‌باز قدرتمند" },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className={cn(
+                      "p-3 rounded-xl border text-start transition-all flex flex-col justify-between gap-2",
+                      modelInput === m.id
+                        ? "bg-purple-950/80 border-purple-500 text-white shadow-lg ring-1 ring-purple-500"
+                        : "bg-black/40 border-white/10 hover:border-white/20 text-muted-foreground"
+                    )}
+                    onClick={() => setModelInput(m.id)}
+                  >
+                    <span className="font-semibold text-xs text-white truncate">{m.name}</span>
+                    <Badge variant="outline" className="text-[10px] w-fit border-purple-500/30 text-purple-300">
+                      {m.badge}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Model Input */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-white/80">شناسه مدل سفارشی OpenRouter (Custom Model Identifier):</label>
+              <Input
+                value={modelInput}
+                onChange={(e) => setModelInput(e.target.value)}
+                placeholder="e.g. google/gemini-2.5-flash-lite"
+                className="bg-black/60 border-white/20 text-white font-mono text-xs dir-ltr"
+              />
+            </div>
+
+            {/* API Key Update */}
+            <div className="space-y-2 pt-2 border-t border-white/10">
+              <label className="text-sm font-semibold text-white flex items-center gap-2">
+                <Key className="size-4 text-purple-400" /> کلید API جدید OpenRouter (اختیاری):
+              </label>
+              <p className="text-xs text-muted-foreground">
+                کلید فعلی: <span className="font-mono text-purple-300">{aiSettings.data?.openRouterApiKeyMasked || "ثبت نشده"}</span>
+              </p>
+              <Input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="اگر قصد تغییر کلید API را دارید کلید جدید را وارد کنید (sk-or-v1-...)"
+                className="bg-black/60 border-white/20 text-white font-mono text-xs dir-ltr"
+              />
+            </div>
+
+            {/* Save Button */}
+            <div className="pt-4 flex justify-end">
+              <Button
+                className="bg-purple-600 hover:bg-purple-700 text-white gap-2 px-6 rounded-xl font-medium shadow-lg"
+                disabled={updateSettingsMutation.isPending}
+                onClick={() => {
+                  updateSettingsMutation.mutate({
+                    openRouterModel: modelInput,
+                    ...(apiKeyInput.trim() ? { openRouterApiKey: apiKeyInput.trim() } : {}),
+                  });
+                }}
+              >
+                {updateSettingsMutation.isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Save className="size-4" />
+                )}
+                ذخیره تنظیمات هوش مصنوعی
+              </Button>
+            </div>
           </Card>
         </TabsContent>
       </Tabs>
