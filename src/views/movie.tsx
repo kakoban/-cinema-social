@@ -546,19 +546,13 @@ export function MovieView({ id }: { id: string }) {
 
             <div className="flex flex-col gap-2 mt-4 max-w-xs mx-auto md:mx-0">
               {allServers.length > 0 && (
-                <Button className="bg-red-600 hover:bg-red-700 w-full" onClick={() => setActiveModal("stream")}>
-                  <Play className="size-4 me-2" /> {t("movie.watchNow")}
-                </Button>
-              )}
-
-              {m.trailerUrl && (
-                <Button variant="outline" className="w-full" onClick={() => setActiveModal("trailer")}>
-                  <Youtube className="size-4 me-2" /> {t("movie.trailer")}
-                </Button>
-              )}
-
-              <Dialog open={activeModal !== null} onOpenChange={(open) => !open && setActiveModal(null)}>
-                <DialogContent className="sm:max-w-5xl md:max-w-6xl w-[95vw] p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-2xl sm:rounded-2xl" dir="ltr">
+                <Dialog open={activeModal === "stream"} onOpenChange={(open) => setActiveModal(open ? "stream" : null)}>
+                  <DialogTrigger asChild>
+                    <Button className="bg-red-600 hover:bg-red-700 w-full">
+                      <Play className="size-4 me-2" /> {t("movie.watchNow")}
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-5xl md:max-w-6xl w-[95vw] p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-2xl sm:rounded-2xl" dir="ltr">
                   {activeModal === "stream" && activeServerUrl && (
                     <div ref={modalRef} className={isMaximized ? "fixed inset-0 z-[99999] w-screen h-screen bg-black flex flex-col overflow-hidden" : "flex flex-col"} dir="ltr">
                       {/* Premium Stream Header Bar */}
@@ -690,7 +684,18 @@ export function MovieView({ id }: { id: string }) {
                     </div>
                   )}
 
-                  {activeModal === "trailer" && trailerKey && (
+                </DialogContent>
+                </Dialog>
+              )}
+
+              {m.trailerUrl && trailerKey && (
+                <Dialog open={activeModal === "trailer"} onOpenChange={(open) => setActiveModal(open ? "trailer" : null)}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" className="w-full">
+                      <Youtube className="size-4 me-2" /> {t("movie.trailer")}
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-5xl md:max-w-6xl w-[95vw] p-0 overflow-hidden bg-black/95" dir="ltr">
                     <div className="aspect-video" dir="ltr">
                       <iframe
                         src={`https://www.youtube.com/embed/${trailerKey}`}
@@ -699,9 +704,9 @@ export function MovieView({ id }: { id: string }) {
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       />
                     </div>
-                  )}
-                </DialogContent>
-              </Dialog>
+                  </DialogContent>
+                </Dialog>
+              )}
 
               {user ? (
                 <>
