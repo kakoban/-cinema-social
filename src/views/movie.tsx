@@ -431,39 +431,15 @@ export function MovieView({ id }: { id: string }) {
     },
   });
 
-  if (movie.isLoading) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <Skeleton className="h-64 sm:h-80 w-full rounded-2xl mb-6" />
-        <div className="grid md:grid-cols-3 gap-6">
-          <Skeleton className="aspect-[2/3] rounded-xl" />
-          <div className="md:col-span-2 space-y-4">
-            <Skeleton className="h-10 w-2/3" />
-            <Skeleton className="h-5 w-1/3" />
-            <Skeleton className="h-24 w-full" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!movie.data) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
-        <AlertCircle className="size-12 mx-auto text-muted-foreground mb-3" />
-        <p className="text-muted-foreground">{t("error")}</p>
-      </div>
-    );
-  }
-
-  const m = movie.data;
-  const trailerKey = m.trailerUrl
+  // ── Derived values (computed before early returns for Rules of Hooks compliance) ──
+  let m = movie.data ?? null;
+  const trailerKey = m?.trailerUrl
     ? m.trailerUrl.split("v=")[1]?.split("&")[0]
     : null;
 
   // determine watch embed url
   let watchEmbed: string | null = null;
-  if (m.videoUrl) {
+  if (m?.videoUrl) {
     if (m.source === "ARCHIVE" || m.videoUrl.includes("archive.org")) {
       const aid = m.archiveId || m.videoUrl.split("/").pop();
       watchEmbed = `https://archive.org/embed/${aid}`;
@@ -484,7 +460,7 @@ export function MovieView({ id }: { id: string }) {
 
   const defaultSandbox = "allow-same-origin allow-scripts allow-presentation allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-top-navigation-by-user-activation allow-downloads";
 
-  if (m.tmdbId) {
+  if (m?.tmdbId) {
     allServers.push(
       { name: "VidLink Pro", url: `https://vidlink.pro/movie/${m.tmdbId}`, sandbox: false },
       { name: "VidSrc.to", url: `https://vidsrc.to/embed/movie/${m.tmdbId}`, sandbox: false },
@@ -532,6 +508,35 @@ export function MovieView({ id }: { id: string }) {
       setIframeError(false);
     }
   }, [activeModal]);
+
+  // ── Early returns (all hooks are above) ──
+  if (movie.isLoading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <Skeleton className="h-64 sm:h-80 w-full rounded-2xl mb-6" />
+        <div className="grid md:grid-cols-3 gap-6">
+          <Skeleton className="aspect-[2/3] rounded-xl" />
+          <div className="md:col-span-2 space-y-4">
+            <Skeleton className="h-10 w-2/3" />
+            <Skeleton className="h-5 w-1/3" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!movie.data) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
+        <AlertCircle className="size-12 mx-auto text-muted-foreground mb-3" />
+        <p className="text-muted-foreground">{t("error")}</p>
+      </div>
+    );
+  }
+
+  // movie.data is guaranteed non-null after early returns above
+  m = movie.data;
 
   return (
     <div>
