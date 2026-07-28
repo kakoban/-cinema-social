@@ -697,7 +697,6 @@ export function MovieView({ id }: { id: string }) {
                           src={activeServerUrl}
                           className="size-full absolute inset-0 border-0"
                           allowFullScreen={true}
-                          referrerPolicy="no-referrer"
                           allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
                           onLoad={() => { setIframeLoaded(true); setIframeError(false); }}
                           onError={() => { setIframeError(true); handleNextServer(); }}
