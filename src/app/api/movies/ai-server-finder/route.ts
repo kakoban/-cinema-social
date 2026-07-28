@@ -91,6 +91,8 @@ export async function GET(req: NextRequest) {
     { name: "VidLink Pro", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}` },
   ] : [
     { name: "VidLink Pro", url: `https://vidlink.pro/movie/${tmdbId}` },
+    { name: "VidSrc.to", url: `https://vidsrc.to/embed/movie/${tmdbId}` },
+    { name: "2Embed", url: `https://www.2embed.cc/embed/tmdb/movie?id=${tmdbId}` },
   ];
 
   // 1. Run parallel server deep health checks

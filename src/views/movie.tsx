@@ -131,6 +131,9 @@ export function MovieView({ id }: { id: string }) {
   const [activeModal, setActiveModal] = useState<"watch" | "stream" | "trailer" | null>(null);
   const [activeServerIdx, setActiveServerIdx] = useState(0);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [iframeError, setIframeError] = useState(false);
+  const iframeRetryCount = useRef(0);
   const [subtitleTrackUrl, setSubtitleTrackUrl] = useState<string | null>(null);
   useEffect(() => {
     if (subtitleTrackUrl) {
@@ -483,9 +486,9 @@ export function MovieView({ id }: { id: string }) {
 
   if (m.tmdbId) {
     allServers.push(
-      // ✅ Live-tested working servers (sorted by reliability)
       { name: "VidLink Pro", url: `https://vidlink.pro/movie/${m.tmdbId}`, sandbox: false },
-      
+      { name: "VidSrc.to", url: `https://vidsrc.to/embed/movie/${m.tmdbId}`, sandbox: false },
+      { name: "2Embed", url: `https://www.2embed.cc/embed/tmdb/movie?id=${m.tmdbId}`, sandbox: false },
     );
   }
 
@@ -496,11 +499,39 @@ export function MovieView({ id }: { id: string }) {
   const activeServer = allServers[activeServerIdx] || allServers[0];
   const activeServerUrl = activeServer?.url || null;
 
-  const handleNextServer = () => {
+  const handleNextServer = useCallback(() => {
     if (allServers.length === 0) return;
+    setIframeLoaded(false);
+    setIframeError(false);
     setActiveServerIdx((prev) => (prev + 1) % allServers.length);
-    toast.info("Switched to next stream server");
-  };
+    toast.info("در حال تست سرور بعدی...");
+  }, [allServers.length]);
+
+  // Auto-retry: if iframe doesn't load within 12 seconds, try next server
+  useEffect(() => {
+    if (activeModal !== "stream" || !activeServerUrl || iframeLoaded) return;
+    setIframeError(false);
+    const timer = setTimeout(() => {
+      if (!iframeLoaded && iframeRetryCount.current < allServers.length) {
+        iframeRetryCount.current++;
+        setIframeError(true);
+        toast.error(`سرور ${allServers[activeServerIdx]?.name} پاسخ نداد. در حال تست سرور بعدی...`);
+        handleNextServer();
+      } else if (iframeRetryCount.current >= allServers.length) {
+        setIframeError(true);
+      }
+    }, 12000);
+    return () => clearTimeout(timer);
+  }, [activeModal, activeServerUrl, activeServerIdx, iframeLoaded, allServers.length, handleNextServer]);
+
+  // Reset retry counter when modal opens
+  useEffect(() => {
+    if (activeModal === "stream") {
+      iframeRetryCount.current = 0;
+      setIframeLoaded(false);
+      setIframeError(false);
+    }
+  }, [activeModal]);
 
   return (
     <div>
@@ -546,15 +577,23 @@ export function MovieView({ id }: { id: string }) {
 
             <div className="flex flex-col gap-2 mt-4 max-w-xs mx-auto md:mx-0">
               {allServers.length > 0 && (
-                <Dialog open={activeModal === "stream"} onOpenChange={(open) => setActiveModal(open ? "stream" : null)}>
-                  <DialogTrigger asChild>
-                    <Button className="bg-red-600 hover:bg-red-700 w-full">
-                      <Play className="size-4 me-2" /> {t("movie.watchNow")}
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-5xl md:max-w-6xl w-[95vw] p-0 overflow-hidden bg-black/95 backdrop-blur-xl border border-white/10 shadow-2xl sm:rounded-2xl" dir="ltr">
-                  {activeModal === "stream" && activeServerUrl && (
-                    <div ref={modalRef} className={isMaximized ? "fixed inset-0 z-[99999] w-screen h-screen bg-black flex flex-col overflow-hidden" : "flex flex-col"} dir="ltr">
+                <Button className="bg-red-600 hover:bg-red-700 w-full" onClick={() => setActiveModal("stream")}>
+                  <Play className="size-4 me-2" /> {t("movie.watchNow")}
+                </Button>
+              )}
+
+              {m.trailerUrl && trailerKey && (
+                <Button variant="outline" className="w-full" onClick={() => setActiveModal("trailer")}>
+                  <Youtube className="size-4 me-2" /> {t("movie.trailer")}
+                </Button>
+              )}
+
+              {activeModal === "stream" && activeServerUrl && typeof document !== "undefined" && (
+                <div className="fixed inset-0 z-[99999]" dir="ltr">
+                  {/* Backdrop */}
+                  <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setActiveModal(null)} />
+                  {/* Player container */}
+                  <div ref={modalRef} className={isMaximized ? "fixed inset-0 z-[100000] w-screen h-screen bg-black flex flex-col overflow-hidden" : "absolute inset-4 sm:inset-8 md:inset-12 lg:inset-16 z-[100000] bg-black/95 rounded-2xl overflow-hidden flex flex-col border border-white/10 shadow-2xl"} dir="ltr">
                       {/* Premium Stream Header Bar */}
                       <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/90 border-b border-white/10 backdrop-blur-md gap-3 shrink-0">
                         <div className="flex items-center gap-2 shrink-0">
@@ -653,8 +692,46 @@ export function MovieView({ id }: { id: string }) {
                           src={activeServerUrl}
                           className="size-full absolute inset-0 border-0"
                           allowFullScreen={true}
-                          allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; accelerometer *; gyroscope *"
+                          referrerPolicy="no-referrer"
+                          allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
+                          onLoad={() => { setIframeLoaded(true); setIframeError(false); }}
+                          onError={() => { setIframeError(true); handleNextServer(); }}
                         />
+                        {/* Loading indicator */}
+                        {!iframeLoaded && !iframeError && (
+                          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/90">
+                            <Loader2 className="size-10 animate-spin text-red-500 mb-4" />
+                            <p className="text-white text-sm font-medium" dir="rtl">در حال بارگذاری سرور {allServers[activeServerIdx]?.name}...</p>
+                            <p className="text-white/50 text-xs mt-2" dir="rtl">اگر بارگذاری نشد، خودکار سرور بعدی تست می‌شود</p>
+                          </div>
+                        )}
+                        {/* All servers failed */}
+                        {iframeError && iframeRetryCount.current >= allServers.length && (
+                          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/95 p-6">
+                            <AlertCircle className="size-12 text-red-500 mb-4" />
+                            <p className="text-white text-base font-bold mb-2" dir="rtl">هیچ سروری پاسخ نداد</p>
+                            <p className="text-white/70 text-sm text-center mb-4" dir="rtl">
+                              احتمالاً سرورها توسط اینترنت شما فیلتر شده‌اند. از VPN استفاده کنید و دوباره تلاش کنید.
+                            </p>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                className="bg-red-600 hover:bg-red-700 text-white"
+                                onClick={() => { iframeRetryCount.current = 0; setIframeLoaded(false); setIframeError(false); setActiveServerIdx(0); }}
+                              >
+                                تلاش مجدد
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-white/20 text-white hover:bg-white/10"
+                                onClick={handleNextServer}
+                              >
+                                سرور بعدی
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                         <SubtitleOverlay vttUrl={subtitleTrackUrl} />
                       </div>
 
@@ -681,32 +758,29 @@ export function MovieView({ id }: { id: string }) {
                           HD 1080p
                         </Badge>
                       </div>
-                    </div>
+                      </div>
+                      </div>
+                      )}
+
+                  {activeModal === "trailer" && trailerKey && typeof document !== "undefined" && (
+                  <div className="fixed inset-0 z-[99999]" dir="ltr">
+                  <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setActiveModal(null)} />
+                  <div className="absolute inset-4 sm:inset-8 md:inset-12 lg:inset-16 z-[100000] bg-black/95 rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
+                  <div className="flex items-center justify-between px-4 py-2 bg-zinc-950/90 border-b border-white/10">
+                    <span className="text-xs text-white/70">Trailer</span>
+                    <button className="text-white/70 hover:text-white text-lg px-2" onClick={() => setActiveModal(null)}>✕</button>
+                  </div>
+                  <div className="aspect-video">
+                    <iframe
+                      src={`https://www.youtube.com/embed/${trailerKey}`}
+                      className="size-full"
+                      allowFullScreen
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    />
+                  </div>
+                  </div>
+                  </div>
                   )}
-
-                </DialogContent>
-                </Dialog>
-              )}
-
-              {m.trailerUrl && trailerKey && (
-                <Dialog open={activeModal === "trailer"} onOpenChange={(open) => setActiveModal(open ? "trailer" : null)}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" className="w-full">
-                      <Youtube className="size-4 me-2" /> {t("movie.trailer")}
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-5xl md:max-w-6xl w-[95vw] p-0 overflow-hidden bg-black/95" dir="ltr">
-                    <div className="aspect-video" dir="ltr">
-                      <iframe
-                        src={`https://www.youtube.com/embed/${trailerKey}`}
-                        className="size-full"
-                        allowFullScreen
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      />
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              )}
 
               {user ? (
                 <>
