@@ -660,17 +660,6 @@ export function MovieView({ id }: { id: string }) {
                           className="size-full absolute inset-0 border-0"
                           allowFullScreen={true}
                           allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; accelerometer *; gyroscope *"
-                          referrerPolicy="origin"
-                          sandbox={
-                            activeServer?.sandbox === false
-                              ? undefined
-                              : typeof activeServer?.sandbox === "string"
-                              ? activeServer.sandbox
-                              : activeServer?.sandbox === true
-                              ? "allow-same-origin allow-scripts allow-presentation allow-forms allow-popups allow-popups-to-escape-sandbox"
-                              : undefined
-                          }
-
                         />
                         <SubtitleOverlay vttUrl={subtitleTrackUrl} />
                       </div>

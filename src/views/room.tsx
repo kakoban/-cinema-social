@@ -1289,16 +1289,6 @@ export function RoomView({ id }: { id: string }) {
                     className="size-full absolute inset-0 border-0"
                     allowFullScreen={true}
                     allow="autoplay *; fullscreen *; encrypted-media *; picture-in-picture *; accelerometer *; gyroscope *"
-                    referrerPolicy="origin"
-                    sandbox={
-                      activeRoomServer?.sandbox === false
-                        ? undefined
-                        : typeof activeRoomServer?.sandbox === "string"
-                        ? activeRoomServer.sandbox
-                        : activeRoomServer?.sandbox === true
-                        ? "allow-same-origin allow-scripts allow-presentation allow-forms allow-popups allow-popups-to-escape-sandbox"
-                        : undefined
-                    }
                   />
                   <SubtitleOverlay vttUrl={subtitleUrl} />
                   {!isHost && (
