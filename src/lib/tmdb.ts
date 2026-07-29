@@ -78,27 +78,41 @@ export async function ensureMovieFromTmdb(
   tmdbId: number
 ) {
   const { db } = await import("./db");
-  const existing = await db.movie.findUnique({ where: { tmdbId } });
+  let existing = null;
+  try {
+    existing = await db.movie.findUnique({ where: { tmdbId } });
+  } catch (e) {
+    console.warn("DB offline in ensureMovieFromTmdb, fetching directly from TMDB API");
+  }
   if (existing) return existing;
+
   const detail = await tmdbDetail(tmdbId);
   if (!detail) return null;
   const genre = detail.genres?.map((g) => g.name).join(", ") || null;
   const year = detail.release_date
     ? new Date(detail.release_date).getFullYear()
     : null;
-  return db.movie.create({
-    data: {
-      tmdbId: detail.id,
-      title: detail.title,
-      poster: POSTER(detail.poster_path),
-      backdrop: BACKDROP(detail.backdrop_path),
-      description: detail.overview || null,
-      year,
-      rating: detail.vote_average ?? null,
-      genre,
-      runtime: detail.runtime ?? null,
-      source: "TMDB",
-      videoUrl: null, // TMDB doesn't provide video files
-    },
-  });
+
+  const movieData = {
+    id: `tmdb_${detail.id}`,
+    tmdbId: detail.id,
+    archiveId: null,
+    title: detail.title,
+    poster: POSTER(detail.poster_path),
+    backdrop: BACKDROP(detail.backdrop_path),
+    description: detail.overview || null,
+    year,
+    rating: detail.vote_average ?? null,
+    genre,
+    runtime: detail.runtime ?? null,
+    source: "TMDB",
+    videoUrl: null,
+    trailerUrl: null,
+  };
+
+  try {
+    return await db.movie.create({ data: movieData });
+  } catch (e) {
+    return movieData as any;
+  }
 }

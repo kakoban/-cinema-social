@@ -9,20 +9,24 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const reviews = await db.review.findMany({
-    where: { movieId: id },
-    orderBy: { createdAt: "desc" },
-    include: {
-      user: {
-        select: {
-          id: true,
-          username: true,
-          avatar: true,
+  try {
+    const reviews = await db.review.findMany({
+      where: { movieId: id },
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+          },
         },
       },
-    },
-  });
-  return ok(reviews);
+    });
+    return ok(reviews);
+  } catch (e) {
+    return ok([]);
+  }
 }
 
 export async function POST(

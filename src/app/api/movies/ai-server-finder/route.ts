@@ -86,13 +86,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing required parameter 'tmdbId'" }, { status: 400 });
   }
 
-  // Define candidate mirrors — only include live-tested servers
   const candidateServers = type === "tv" ? [
+    { name: "VidSrc ME", url: `https://vidsrcme.ru/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}` },
+    { name: "AutoEmbed", url: `https://autoembed.co/tv/tmdb/${tmdbId}-${season}-${episode}` },
     { name: "VidLink Pro", url: `https://vidlink.pro/tv/${tmdbId}/${season}/${episode}` },
   ] : [
+    { name: "VidSrc ME", url: `https://vidsrcme.ru/embed/movie?tmdb=${tmdbId}` },
+    { name: "VidSrc NL", url: `https://player.vidsrc.nl/movie/${tmdbId}` },
+    { name: "AnyEmbed", url: `https://anyembed.xyz/embed/tmdb-movie-${tmdbId}` },
+    { name: "AutoEmbed", url: `https://autoembed.co/movie/tmdb/${tmdbId}` },
+    { name: "SmashyStream", url: `https://embed.smashystream.com/playere.php?tmdb=${tmdbId}` },
     { name: "VidLink Pro", url: `https://vidlink.pro/movie/${tmdbId}` },
-    { name: "VidSrc.to", url: `https://vidsrc.to/embed/movie/${tmdbId}` },
-    { name: "2Embed", url: `https://www.2embed.cc/embed/tmdb/movie?id=${tmdbId}` },
   ];
 
   // 1. Run parallel server deep health checks

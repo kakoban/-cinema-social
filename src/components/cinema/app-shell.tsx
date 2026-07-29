@@ -116,7 +116,15 @@ export function AppShell() {
   }, [bootstrap]);
 
   if (!mounted) {
-    return null; // Prevents SSR mismatch completely
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <Header />
+        <main className="flex-1 w-full flex items-center justify-center py-20">
+          <div className="size-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+        </main>
+        <Footer />
+      </div>
+    );
   }
 
   return (

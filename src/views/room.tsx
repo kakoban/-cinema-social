@@ -893,16 +893,12 @@ export function RoomView({ id }: { id: string }) {
   const defaultSandbox = "allow-same-origin allow-scripts allow-presentation allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-top-navigation-by-user-activation allow-downloads";
 
   const roomTmdbServers: ServerConfig[] = r?.movie?.tmdbId ? [
-    // Multiple embed servers for fallback (if one is down, try the next)
-    { name: "VidSrc PRO", url: `https://vidsrc.pro/embed/movie/${r.movie.tmdbId}`, sandbox: false },
-    { name: "VidSrc XYZ", url: `https://vidsrc.xyz/embed/movie?tmdb=${r.movie.tmdbId}`, sandbox: false },
-    { name: "VidSrc CC", url: `https://vidsrc.cc/v2/embed/movie/${r.movie.tmdbId}`, sandbox: false },
+    { name: "VidSrc ME", url: `https://vidsrcme.ru/embed/movie?tmdb=${r.movie.tmdbId}`, sandbox: false },
+    { name: "VidSrc NL", url: `https://player.vidsrc.nl/movie/${r.movie.tmdbId}`, sandbox: false },
+    { name: "AnyEmbed", url: `https://anyembed.xyz/embed/tmdb-movie-${r.movie.tmdbId}`, sandbox: false },
+    { name: "AutoEmbed", url: `https://autoembed.co/movie/tmdb/${r.movie.tmdbId}`, sandbox: false },
+    { name: "SmashyStream", url: `https://embed.smashystream.com/playere.php?tmdb=${r.movie.tmdbId}`, sandbox: false },
     { name: "VidLink Pro", url: `https://vidlink.pro/movie/${r.movie.tmdbId}`, sandbox: false },
-    { name: "AutoEmbed", url: `https://autoembed.cc/movie/tmdb/${r.movie.tmdbId}`, sandbox: false },
-    { name: "Embed SU", url: `https://embed.su/embed/movie/${r.movie.tmdbId}`, sandbox: false },
-    { name: "MultiEmbed", url: `https://multiembed.mov/?video_id=${r.movie.tmdbId}&tmdb=1`, sandbox: false },
-    { name: "VidSrc ICU", url: `https://vidsrc.icu/embed/movie/${r.movie.tmdbId}`, sandbox: false },
-    { name: "2Embed", url: `https://www.2embed.cc/embed/${r.movie.tmdbId}`, sandbox: false },
   ] : [];
 
   // Use local file if available, otherwise use active mirror or room movie URL

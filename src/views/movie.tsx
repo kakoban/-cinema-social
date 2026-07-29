@@ -462,6 +462,7 @@ export function MovieView({ id }: { id: string }) {
 
   if (m?.tmdbId) {
     allServers.push(
+      { name: "VidZee", url: `https://player.vidzee.wtf/embed/movie/${m.tmdbId}`, sandbox: false },
       { name: "VidSrc.to", url: `https://vidsrc.to/embed/movie/${m.tmdbId}`, sandbox: false },
       { name: "2Embed", url: `https://www.2embed.cc/embed/tmdb/movie?id=${m.tmdbId}`, sandbox: false },
       { name: "VidLink Pro", url: `https://vidlink.pro/movie/${m.tmdbId}`, sandbox: false },

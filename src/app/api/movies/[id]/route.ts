@@ -12,9 +12,14 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    let movie: any = null;
 
     // Try local DB first (cuid)
-    let movie = await db.movie.findUnique({ where: { id } });
+    try {
+      movie = await db.movie.findUnique({ where: { id } });
+    } catch (e) {
+      console.warn("DB findUnique failed, trying dynamic providers");
+    }
 
     if (!movie) {
       if (id.startsWith('yt_')) {
@@ -34,22 +39,16 @@ export async function GET(
 
     if (!movie) return notFound("Movie not found");
 
-    // If TMDB source and no trailer yet, try to fetch
-    if (movie.tmdbId && !movie.trailerUrl) {
-      const trailer = await tmdbTrailer(movie.tmdbId);
-      if (trailer) {
-        movie = await db.movie.update({
-          where: { id: movie.id },
-          data: { trailerUrl: trailer },
-        });
-      }
-    }
-
     // aggregate local review stats
-    const reviews = await db.review.findMany({
-      where: { movieId: movie.id },
-      select: { rating: true },
-    });
+    let reviews: any[] = [];
+    try {
+      reviews = await db.review.findMany({
+        where: { movieId: movie.id },
+        select: { rating: true },
+      });
+    } catch (e) {
+      /* ignore db error for reviews */
+    }
     const avgRating = reviews.length
       ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
       : null;
